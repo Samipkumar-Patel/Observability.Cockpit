@@ -1,3 +1,6 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
+azure-identity==1.19.0
+azure-mgmt-costmanagement==4.0.1
+azure-mgmt-resource==23.2.0

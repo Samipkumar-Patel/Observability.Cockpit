@@ -1,4 +1,9 @@
+from time import monotonic
+
 from .models import CostPoint, Overview, Recommendation, ResourceCost, ServiceCost
+
+_azure_overview_cache: dict[str, tuple[float, Overview]] = {}
+_AZURE_CACHE_SECONDS = 60
 
 
 def _recommendations(resources: list[ResourceCost]) -> list[Recommendation]:
@@ -57,6 +62,7 @@ def get_demo_overview() -> Overview:
     ]
     recommendations = _recommendations(resources)
     return Overview(
+        data_source="demo",
         subscription_name="Contoso Engineering (demo)",
         currency="USD",
         current_month_cost=1076.00,
@@ -77,3 +83,24 @@ def get_demo_overview() -> Overview:
         resources=resources,
         recommendations=recommendations,
     )
+
+
+def get_overview(data_source: str | None = None, subscription_id: str | None = None) -> Overview:
+    from .azure_provider import AzureCostProvider
+    from .config import get_settings
+
+    settings = get_settings()
+    selected_source = (data_source or settings.data_source).lower()
+    if selected_source not in {"demo", "azure"}:
+        raise ValueError("data_source must be either 'demo' or 'azure'")
+    if selected_source == "demo":
+        return get_demo_overview()
+    selected_subscription = subscription_id or settings.subscription_id
+    if not selected_subscription:
+        raise ValueError("AZURE_SUBSCRIPTION_ID is required when COCKPIT_DATA_SOURCE=azure")
+    cached = _azure_overview_cache.get(selected_subscription)
+    if cached and monotonic() - cached[0] < _AZURE_CACHE_SECONDS:
+        return cached[1]
+    overview = AzureCostProvider(selected_subscription).get_overview()
+    _azure_overview_cache[selected_subscription] = (monotonic(), overview)
+    return overview

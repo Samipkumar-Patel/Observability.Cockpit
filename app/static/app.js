@@ -1,8 +1,16 @@
-const money = value => `$${value.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+let activeCurrency = "USD";
+const money = value => new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: activeCurrency,
+  maximumFractionDigits: 0,
+}).format(value);
 
 async function loadOverview() {
   const response = await fetch("/api/overview");
   const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || "Unable to load cockpit data");
+  activeCurrency = data.currency || "USD";
+  document.querySelector("#source-badge").textContent = data.data_source === "azure" ? "AZURE DATA" : "DEMO DATA";
   document.querySelector("#subscription").textContent = data.subscription_name;
   document.querySelector("#current-cost").textContent = money(data.current_month_cost);
   document.querySelector("#change").textContent = `↑ ${data.change_percent}%`;
@@ -28,6 +36,6 @@ async function loadOverview() {
   `).join("");
 }
 
-loadOverview().catch(() => {
-  document.querySelector("#subscription").textContent = "Unable to load cockpit data";
+loadOverview().catch(error => {
+  document.querySelector("#subscription").textContent = error.message;
 });

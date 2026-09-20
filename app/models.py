@@ -32,6 +32,7 @@ class Recommendation(BaseModel):
 
 
 class Overview(BaseModel):
+    data_source: str
     subscription_name: str
     currency: str
     current_month_cost: float = Field(ge=0)

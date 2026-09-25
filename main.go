@@ -1,13 +1,15 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"sync"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 type TraceSpan struct {
@@ -20,33 +22,75 @@ type TraceSpan struct {
 	Timestamp     time.Time `json:"timestamp"`
 }
 
-var (
-	mu       sync.Mutex
-	spans    []TraceSpan
-	maxSpans = 50
-)
+var db *sql.DB
 
-func addSpan(span TraceSpan) {
-	mu.Lock()
-	defer mu.Unlock()
+func initDB() error {
+	var err error
+	db, err = sql.Open("sqlite", "telemetry.db")
+	if err != nil {
+		return err
+	}
+
+	query := `
+	CREATE TABLE IF NOT EXISTS spans (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		trace_id TEXT,
+		span_id TEXT,
+		service_name TEXT,
+		operation_name TEXT,
+		duration_ms INTEGER,
+		status_code INTEGER,
+		timestamp DATETIME
+	);
+	`
+	_, err = db.Exec(query)
+	return err
+}
+
+func addSpan(span TraceSpan) error {
 	if span.Timestamp.IsZero() {
 		span.Timestamp = time.Now()
 	}
-	spans = append([]TraceSpan{span}, spans...)
-	if len(spans) > maxSpans {
-		spans = spans[:maxSpans]
-	}
+	query := `INSERT INTO spans (trace_id, span_id, service_name, operation_name, duration_ms, status_code, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	_, err := db.Exec(query, span.TraceID, span.SpanID, span.ServiceName, span.OperationName, span.DurationMs, span.StatusCode, span.Timestamp)
+	return err
 }
 
-func getSpans() []TraceSpan {
-	mu.Lock()
-	defer mu.Unlock()
-	copied := make([]TraceSpan, len(spans))
-	copy(copied, spans)
-	return copied
+func getSpans() ([]TraceSpan, error) {
+	query := `SELECT trace_id, span_id, service_name, operation_name, duration_ms, status_code, timestamp FROM spans ORDER BY timestamp DESC LIMIT 50`
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var spans []TraceSpan
+	for rows.Next() {
+		var s TraceSpan
+		var ts string
+		if err := rows.Scan(&s.TraceID, &s.SpanID, &s.ServiceName, &s.OperationName, &s.DurationMs, &s.StatusCode, &ts); err != nil {
+			continue
+		}
+		// Parse timestamp
+		if t, err := time.Parse("2006-01-02 15:04:05.999999999-07:00", ts); err == nil {
+			s.Timestamp = t
+		} else if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			s.Timestamp = t
+		} else {
+			s.Timestamp = time.Now()
+		}
+		spans = append(spans, s)
+	}
+	return spans, nil
 }
 
 func seedDemoData() {
+	var count int
+	db.QueryRow(`SELECT COUNT(*) FROM spans`).Scan(&count)
+	if count > 0 {
+		return
+	}
+
 	addSpan(TraceSpan{
 		TraceID:       "a1b2c3d4e5f6",
 		SpanID:        "11223344",
@@ -98,11 +142,11 @@ func getDashboardHTML() string {
   <main class="shell">
     <header class="topbar">
       <div>
-        <p class="eyebrow">SINGLE-BINARY ENGINE</p>
+        <p class="eyebrow">SINGLE-BINARY ENGINE + SQLITE</p>
         <h1>CloudOps Cockpit</h1>
-        <p class="muted">Zero-config OTLP telemetry ingestion and live request tracing.</p>
+        <p class="muted">Zero-config OTLP telemetry ingestion with persistent SQLite storage.</p>
       </div>
-      <span class="badge">RUNNING</span>
+      <span class="badge">RUNNING (PERSISTENT)</span>
     </header>
 
     <section class="panel">
@@ -165,6 +209,12 @@ func getDashboardHTML() string {
 }
 
 func main() {
+	if err := initDB(); err != nil {
+		fmt.Printf("Failed to initialize database: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
 	seedDemoData()
 
 	port := os.Getenv("PORT")
@@ -176,17 +226,23 @@ func main() {
 
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		spans, _ := getSpans()
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":       "healthy",
 			"name":         "CloudOps Observability Platform",
-			"version":      "0.2.0-alpha",
-			"active_spans": len(getSpans()),
+			"version":      "0.3.0-sqlite",
+			"active_spans": len(spans),
 		})
 	})
 
 	mux.HandleFunc("/api/traces", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(getSpans())
+		spans, err := getSpans()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(spans)
 	})
 
 	mux.HandleFunc("/v1/traces", func(w http.ResponseWriter, r *http.Request) {
@@ -215,7 +271,11 @@ func main() {
 			}
 		}
 
-		addSpan(span)
+		if err := addSpan(span); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"success"}`))
 	})
@@ -225,7 +285,7 @@ func main() {
 		fmt.Fprint(w, getDashboardHTML())
 	})
 
-	fmt.Printf("Starting CloudOps Observability Engine on http://localhost:%s\n", port)
+	fmt.Printf("Starting CloudOps Observability Engine (SQLite) on http://localhost:%s\n", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		fmt.Printf("Server failed: %v\n", err)
 	}

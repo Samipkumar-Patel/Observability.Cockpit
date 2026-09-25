@@ -1,4 +1,5 @@
 *.exe
 *.test
 *.prof
+telemetry.db
 dist/

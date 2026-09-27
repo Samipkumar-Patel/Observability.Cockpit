@@ -1,57 +1,20 @@
-# Deployment & Execution Guide
+## Helm Chart Deployment
 
-CloudOps Cockpit can be deployed locally, via Docker, or onto Azure Kubernetes Service (AKS).
+A Helm chart is provided in `deploy/helm/` for deploying CloudOps Cockpit onto any Kubernetes cluster (including Azure Kubernetes Service).
 
----
-
-## 1. Local Development
-
-1. Run the server directly:
-   ```bash
-   go run main.go
-   ```
-2. Open `http://localhost:8080`.
-
----
-
-## 2. Docker & Docker Compose
-
-Run the platform as a container with persistent storage in a single command:
-
+### Install the Chart
 ```bash
-docker compose up --build -d
+helm install cloudops-cockpit ./deploy/helm --namespace observability --create-namespace
 ```
 
-Access the UI at `http://localhost:8080`. To stop the container:
+### Customize Values
+You can override default settings (such as persistence size or Ingress host) by passing a custom values file or command-line flags:
+
 ```bash
-docker compose down
+helm install cloudops-cockpit ./deploy/helm --namespace observability --set ingress.host="cockpit.yourdomain.com"
 ```
 
----
-
-## 3. Azure Kubernetes Service (AKS) Deployment
-
-Deploy CloudOps Cockpit to AKS with persistent storage and Azure Application Gateway Ingress.
-
-### Apply the Kubernetes Manifests
+### Uninstall the Chart
 ```bash
-kubectl apply -f deploy/kubernetes.yaml
+helm uninstall cloudops-cockpit --namespace observability
 ```
-
-This creates:
-- Namespace `observability`
-- A PersistentVolumeClaim (`cloudops-pvc`) for SQLite storage
-- Deployment (`cloudops-cockpit`) with liveness and readiness probes
-- ClusterIP Service (`cloudops-service`)
-- Ingress (`cloudops-ingress`) configured for Azure Application Gateway (`azure/application-gateway`)
-
-### Check Deployment Status
-```bash
-kubectl get all -n observability
-```
-
-### Port Forwarding (Quick Test without Ingress)
-```bash
-kubectl port-forward svc/cloudops-service 8080:80 -n observability
-```
-Open `http://localhost:8080`.

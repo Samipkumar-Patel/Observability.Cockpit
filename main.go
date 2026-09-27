@@ -338,8 +338,6 @@ func getDashboardHTML() string {
     .modal-close { background: none; border: none; font-size: 20px; color: var(--ink); cursor: pointer; }
     .code-view { background: var(--paper); border: 1px solid var(--line); color: var(--ink); padding: 14px; border-radius: 4px; font-family: monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; max-height: 350px; overflow-y: auto; }
     
-    .code-box { background: #111822; color: #a5f3fc; padding: 16px; border-radius: 4px; font-family: monospace; font-size: 13px; overflow-x: auto; margin-top: 10px; }
-    
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
   </style>
 </head>
@@ -467,7 +465,7 @@ func getDashboardHTML() string {
         globalData.logs = await logsRes.json() || [];
         
         updateKPIs();
-        renderTables(globalData);
+        filterData();
       } catch (err) {
         console.error("Failed to load telemetry data", err);
       }
@@ -491,10 +489,28 @@ func getDashboardHTML() string {
     }
 
     function filterData() {
-      const q = document.querySelector("#search-box").value.toLowerCase();
-      const filteredTraces = globalData.traces.filter(s => s.service_name.toLowerCase().includes(q) || s.operation_name.toLowerCase().includes(q));
-      const filteredMetrics = globalData.metrics.filter(m => m.service_name.toLowerCase().includes(q) || m.metric_name.toLowerCase().includes(q));
-      const filteredLogs = globalData.logs.filter(l => l.service_name.toLowerCase().includes(q) || l.message.toLowerCase().includes(q) || l.level.toLowerCase().includes(q));
+      const q = (document.querySelector("#search-box").value || "").toLowerCase().trim();
+      
+      const filteredTraces = globalData.traces.filter(s => {
+        if (!q) return true;
+        return (s.service_name || "").toLowerCase().includes(q) || 
+               (s.operation_name || "").toLowerCase().includes(q) ||
+               String(s.status_code).includes(q);
+      });
+
+      const filteredMetrics = globalData.metrics.filter(m => {
+        if (!q) return true;
+        return (m.service_name || "").toLowerCase().includes(q) || 
+               (m.metric_name || "").toLowerCase().includes(q) ||
+               String(m.value).includes(q);
+      });
+
+      const filteredLogs = globalData.logs.filter(l => {
+        if (!q) return true;
+        return (l.service_name || "").toLowerCase().includes(q) || 
+               (l.message || "").toLowerCase().includes(q) || 
+               (l.level || "").toLowerCase().includes(q);
+      });
       
       renderTables({ traces: filteredTraces, metrics: filteredMetrics, logs: filteredLogs });
     }
@@ -585,7 +601,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.7.0-enhanced-gui",
+			"version":        "0.7.1-fix-filter",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),

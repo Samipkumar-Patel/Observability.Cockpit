@@ -290,11 +290,11 @@ func getDashboardHTML() string {
   <style>
     :root {
       --ink: #17252b; --muted: #718087; --line: #dce5e3; --paper: #f5f7f4; --panel: #fff;
-      --teal: #147d76; --orange: #d66c3c; --hover: #f1f5f3;
+      --teal: #147d76; --orange: #d66c3c; --hover: #f1f5f3; --btn-bg: #e8efeb;
     }
     [data-theme="dark"] {
       --ink: #f0f4f8; --muted: #9aa5b1; --line: #2d3748; --paper: #111822; --panel: #1a2332;
-      --teal: #319795; --orange: #ed8936; --hover: #222d3f;
+      --teal: #319795; --orange: #ed8936; --hover: #222d3f; --btn-bg: #222d3f;
     }
     * { box-sizing: border-box; }
     body { margin: 0; color: var(--ink); background: var(--paper); font: 15px/1.5 system-ui, sans-serif; transition: background 0.2s, color 0.2s; }
@@ -304,7 +304,8 @@ func getDashboardHTML() string {
     .eyebrow { color: var(--teal); font-size: 11px; font-weight: 800; letter-spacing: .12em; margin-bottom: 6px; }
     .badge-group { display: flex; gap: 10px; align-items: center; }
     .badge { background: var(--panel); border: 1px solid var(--line); color: var(--teal); border-radius: 99px; padding: 6px 14px; font-size: 11px; font-weight: 800; }
-    .theme-btn { background: var(--panel); border: 1px solid var(--line); color: var(--ink); border-radius: 99px; padding: 6px 14px; font-size: 11px; font-weight: 800; cursor: pointer; }
+    .btn { background: var(--btn-bg); border: 1px solid var(--line); color: var(--ink); border-radius: 99px; padding: 6px 14px; font-size: 11px; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-primary { background: var(--teal); color: #fff; border-color: var(--teal); }
     
     /* KPI Summary Cards */
     .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
@@ -312,9 +313,19 @@ func getDashboardHTML() string {
     .kpi-card .label { color: var(--muted); font-size: 11px; text-transform: uppercase; font-weight: 700; letter-spacing: .08em; }
     .kpi-card .value { font-size: 26px; font-weight: 700; margin-top: 6px; color: var(--ink); }
 
-    /* Search Bar Toolbar */
-    .toolbar { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 20px; margin-bottom: 24px; display: flex; gap: 16px; align-items: center; }
-    .search-input { flex: 1; padding: 10px 14px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); font: inherit; outline: none; }
+    /* Toolbar */
+    .toolbar { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 20px; margin-bottom: 24px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+    .search-input { flex: 1; min-width: 240px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); font: inherit; outline: none; }
+    .controls { display: flex; gap: 12px; align-items: center; }
+    .select-box { padding: 9px 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); font: inherit; outline: none; cursor: pointer; }
+
+    /* Chart Panel */
+    .chart-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 20px 24px; margin-bottom: 24px; }
+    .chart-bars { display: flex; align-items: flex-end; gap: 12px; height: 110px; border-bottom: 1px solid var(--line); padding-bottom: 4px; margin-top: 14px; overflow-x: auto; }
+    .chart-bar-wrap { flex: 1; min-width: 32px; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+    .chart-bar { width: 100%; background: var(--teal); border-radius: 3px 3px 0 0; transition: height 0.3s; }
+    .chart-bar.error { background: var(--orange); }
+    .chart-label { font-size: 10px; color: var(--muted); margin-top: 6px; white-space: nowrap; }
 
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
     .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 24px; margin-bottom: 20px; }
@@ -350,7 +361,7 @@ func getDashboardHTML() string {
         <p class="muted">Unified OTLP Traces, Metrics, and Logs Console.</p>
       </div>
       <div class="badge-group">
-        <button class="theme-btn" onclick="toggleTheme()">🌓 Theme</button>
+        <button class="btn" onclick="toggleTheme()">🌓 Theme</button>
         <span class="badge">LIVE ENGINE</span>
       </div>
     </header>
@@ -375,9 +386,32 @@ func getDashboardHTML() string {
       </div>
     </section>
 
-    <!-- Search & Filter Toolbar -->
+    <!-- Visual Latency Sparkline Chart -->
+    <section class="chart-panel">
+      <div class="panel-heading" style="margin-bottom:0;">
+        <h2>Trace Latency Distribution</h2>
+        <span class="muted">Last requests (ms)</span>
+      </div>
+      <div class="chart-bars" id="latency-chart">
+        <span class="muted" style="margin: auto; font-size: 13px;">No trace latency data available</span>
+      </div>
+    </section>
+
+    <!-- Search, Filter & Controls Toolbar -->
     <section class="toolbar">
-      <input type="text" id="search-box" class="search-input" placeholder="🔍 Filter traces, metrics, or logs by service name or keyword..." oninput="filterData()">
+      <input type="text" id="search-box" class="search-input" placeholder="🔍 Filter by service name, operation, or keyword..." oninput="filterData()">
+      <div class="controls">
+        <label class="muted" style="font-size:12px; font-weight:700;">Refresh:
+          <select id="refresh-interval" class="select-box" onchange="updateInterval()">
+            <option value="3000">3s</option>
+            <option value="5000">5s</option>
+            <option value="10000">10s</option>
+            <option value="0">Paused</option>
+          </select>
+        </label>
+        <button class="btn btn-primary" onclick="simulateTelemetry()">🧪 Test Telemetry</button>
+        <button class="btn" onclick="exportJSON()">📥 Export JSON</button>
+      </div>
     </section>
 
     <section class="grid">
@@ -441,6 +475,7 @@ func getDashboardHTML() string {
 
   <script>
     let globalData = { traces: [], metrics: [], logs: [] };
+    let refreshTimer = null;
 
     function toggleTheme() {
       const html = document.documentElement;
@@ -465,6 +500,7 @@ func getDashboardHTML() string {
         globalData.logs = await logsRes.json() || [];
         
         updateKPIs();
+        renderChart();
         filterData();
       } catch (err) {
         console.error("Failed to load telemetry data", err);
@@ -486,6 +522,24 @@ func getDashboardHTML() string {
       document.querySelector("#kpi-errors").textContent = errorRate;
       document.querySelector("#kpi-services").textContent = services.size;
       document.querySelector("#kpi-logs").textContent = globalData.logs.length;
+    }
+
+    function renderChart() {
+      const chartContainer = document.querySelector("#latency-chart");
+      const recentTraces = [...globalData.traces].reverse().slice(-15);
+      if (recentTraces.length === 0) {
+        chartContainer.innerHTML = '<span class="muted" style="margin: auto; font-size: 13px;">No trace latency data available</span>';
+        return;
+      }
+      const maxDuration = Math.max(...recentTraces.map(t => t.duration_ms), 50);
+      chartContainer.innerHTML = recentTraces.map(t => {
+        const heightPct = Math.max(Math.round((t.duration_ms / maxDuration) * 100), 8);
+        const isError = t.status_code >= 400;
+        return '<div class="chart-bar-wrap" title="' + t.service_name + ' | ' + t.operation_name + ' | ' + t.duration_ms + 'ms">' +
+          '<div class="chart-bar ' + (isError ? 'error' : '') + '" style="height: ' + heightPct + '%"></div>' +
+          '<span class="chart-label">' + t.duration_ms + 'ms</span>' +
+        '</div>';
+      }).join("");
     }
 
     function filterData() {
@@ -563,6 +617,67 @@ func getDashboardHTML() string {
       }
     }
 
+    async function simulateTelemetry() {
+      const services = ["orders-api", "billing-svc", "users-service", "inventory-db"];
+      const svc = services[Math.floor(Math.random() * services.length)];
+      const isError = Math.random() < 0.25;
+
+      try {
+        await fetch("/v1/traces", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            service_name: svc,
+            operation_name: isError ? "GET /api/fail" : "POST /api/process",
+            duration_ms: Math.floor(Math.random() * 300) + 20,
+            status_code: isError ? 500 : 200
+          })
+        });
+
+        await fetch("/v1/metrics", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            service_name: svc,
+            metric_name: "request_duration_ms",
+            value: Math.floor(Math.random() * 250) + 10
+          })
+        });
+
+        await fetch("/v1/logs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            service_name: svc,
+            level: isError ? "ERROR" : "INFO",
+            message: isError ? "Simulated database connection timeout error" : "Simulated successful request processing"
+          })
+        });
+
+        fetchData();
+      } catch (err) {
+        console.error("Simulation failed", err);
+      }
+    }
+
+    function exportJSON() {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(globalData, null, 2));
+      const dlAnchor = document.createElement('a');
+      dlAnchor.setAttribute("href", dataStr);
+      dlAnchor.setAttribute("download", "cloudops-telemetry-export.json");
+      document.body.appendChild(dlAnchor);
+      dlAnchor.click();
+      dlAnchor.remove();
+    }
+
+    function updateInterval() {
+      const interval = parseInt(document.querySelector("#refresh-interval").value, 10);
+      if (refreshTimer) clearInterval(refreshTimer);
+      if (interval > 0) {
+        refreshTimer = setInterval(fetchData, interval);
+      }
+    }
+
     function showDetails(title, obj) {
       document.querySelector("#modal-title").textContent = title + " Details";
       document.querySelector("#modal-content").textContent = JSON.stringify(obj, null, 2);
@@ -574,7 +689,7 @@ func getDashboardHTML() string {
     }
 
     fetchData();
-    setInterval(fetchData, 3000);
+    refreshTimer = setInterval(fetchData, 3000);
   </script>
 </body>
 </html>`
@@ -601,7 +716,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.7.1-fix-filter",
+			"version":        "0.8.0-pro-gui",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),

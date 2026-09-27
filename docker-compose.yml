@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  cockpit:
+    build: .
+    image: cloudops-cockpit:latest
+    container_name: cloudops-cockpit
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DB_PATH=/data/telemetry.db
+    volumes:
+      - cockpit-data:/data
+    restart: unless-stopped
+
+volumes:
+  cockpit-data:

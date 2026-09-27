@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudops-cockpit
+  namespace: observability
+  labels:
+    app: cloudops-cockpit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cloudops-cockpit
+  template:
+    metadata:
+      labels:
+        app: cloudops-cockpit
+    spec:
+      containers:
+      - name: cockpit
+        image: cloudops-cockpit:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: PORT
+          value: "8080"
+        - name: DB_PATH
+          value: "/data/telemetry.db"
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+        volumeMounts:
+        - name: storage
+          mountPath: /data
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 15
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: cloudops-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cloudops-pvc
+  namespace: observability
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudops-service
+  namespace: observability
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: cloudops-cockpit
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cloudops-ingress
+  namespace: observability
+  annotations:
+    kubernetes.io/ingress.class: "azure/application-gateway"
+    appgw.ingress.kubernetes.io/backend-path-prefix: "/"
+spec:
+  rules:
+  - host: cockpit.internal.cloudapp.azure.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: cloudops-service
+            port:
+              number: 80

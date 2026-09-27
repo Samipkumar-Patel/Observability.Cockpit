@@ -53,7 +53,25 @@ export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:8080"
 export OTEL_SERVICE_NAME="my-web-app"
 ```
 
-### 2. Direct HTTP POST (Custom Apps & Scripts)
+### 2. OpenTelemetry Collector / Agent (Recommended for Production)
+If you run an OpenTelemetry Collector or Agent across your infrastructure, configure its `exporter` block to route traces, metrics, and logs directly to CloudOps Cockpit:
+
+```yaml
+exporters:
+  otlphttp:
+    endpoint: "http://localhost:8080"
+
+service:
+  pipelines:
+    traces:
+      exporters: [otlphttp]
+    metrics:
+      exporters: [otlphttp]
+    logs:
+      exporters: [otlphttp]
+```
+
+### 3. Direct HTTP POST (Custom Apps & Scripts)
 ```powershell
 # Push a Trace Span
 Invoke-RestMethod -Uri "http://localhost:8080/v1/traces" -Method Post -ContentType "application/json" -Body '{"service_name":"checkout-svc","operation_name":"POST /pay","duration_ms":142,"status_code":200}'

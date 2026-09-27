@@ -29,6 +29,13 @@ type MetricPoint struct {
 	Timestamp   time.Time `json:"timestamp"`
 }
 
+type LogEntry struct {
+	ServiceName string    `json:"service_name"`
+	Level       string    `json:"level"`
+	Message     string    `json:"message"`
+	Timestamp   time.Time `json:"timestamp"`
+}
+
 var db *sql.DB
 
 func initDB() error {
@@ -63,7 +70,20 @@ func initDB() error {
 		timestamp DATETIME
 	);
 	`
-	_, err = db.Exec(metricsTable)
+	if _, err := db.Exec(metricsTable); err != nil {
+		return err
+	}
+
+	logsTable := `
+	CREATE TABLE IF NOT EXISTS logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		service_name TEXT,
+		level TEXT,
+		message TEXT,
+		timestamp DATETIME
+	);
+	`
+	_, err = db.Exec(logsTable)
 	return err
 }
 
@@ -82,6 +102,18 @@ func addMetric(m MetricPoint) error {
 	}
 	query := `INSERT INTO metrics (service_name, metric_name, value, timestamp) VALUES (?, ?, ?, ?)`
 	_, err := db.Exec(query, m.ServiceName, m.MetricName, m.Value, m.Timestamp)
+	return err
+}
+
+func addLog(l LogEntry) error {
+	if l.Timestamp.IsZero() {
+		l.Timestamp = time.Now()
+	}
+	if l.Level == "" {
+		l.Level = "INFO"
+	}
+	query := `INSERT INTO logs (service_name, level, message, timestamp) VALUES (?, ?, ?, ?)`
+	_, err := db.Exec(query, l.ServiceName, l.Level, l.Message, l.Timestamp)
 	return err
 }
 
@@ -139,6 +171,33 @@ func getMetrics() ([]MetricPoint, error) {
 	return metrics, nil
 }
 
+func getLogs() ([]LogEntry, error) {
+	query := `SELECT service_name, level, message, timestamp FROM logs ORDER BY timestamp DESC LIMIT 50`
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []LogEntry
+	for rows.Next() {
+		var l LogEntry
+		var ts string
+		if err := rows.Scan(&l.ServiceName, &l.Level, &l.Message, &ts); err != nil {
+			continue
+		}
+		if t, err := time.Parse("2006-01-02 15:04:05.999999999-07:00", ts); err == nil {
+			l.Timestamp = t
+		} else if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			l.Timestamp = t
+		} else {
+			l.Timestamp = time.Now()
+		}
+		logs = append(logs, l)
+	}
+	return logs, nil
+}
+
 func seedDemoData() {
 	var count int
 	db.QueryRow(`SELECT COUNT(*) FROM spans`).Scan(&count)
@@ -177,6 +236,19 @@ func seedDemoData() {
 		Value:       435,
 		Timestamp:   time.Now().Add(-5 * time.Minute),
 	})
+
+	addLog(LogEntry{
+		ServiceName: "auth-service",
+		Level:       "INFO",
+		Message:     "User authenticated successfully for admin@example.com",
+		Timestamp:   time.Now().Add(-8 * time.Second),
+	})
+	addLog(LogEntry{
+		ServiceName: "payment-api",
+		Level:       "ERROR",
+		Message:     "Database connection timeout while executing checkout transaction",
+		Timestamp:   time.Now().Add(-30 * time.Second),
+	})
 }
 
 func getDashboardHTML() string {
@@ -190,7 +262,7 @@ func getDashboardHTML() string {
     :root { --ink: #17252b; --muted: #718087; --line: #dce5e3; --paper: #f5f7f4; --panel: #fff; --teal: #147d76; --orange: #d66c3c; }
     * { box-sizing: border-box; }
     body { margin: 0; color: var(--ink); background: var(--paper); font: 15px/1.5 system-ui, sans-serif; }
-    .shell { max-width: 1100px; margin: 0 auto; padding: 40px 20px; }
+    .shell { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
     .topbar { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 30px; }
     h1, h2, p { margin: 0; } h1 { font-size: 32px; letter-spacing: -.03em; }
     .eyebrow { color: var(--teal); font-size: 11px; font-weight: 800; letter-spacing: .12em; margin-bottom: 6px; }
@@ -204,16 +276,19 @@ func getDashboardHTML() string {
     .tag { background: #e8efeb; color: var(--teal); padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
     .status-error { color: var(--orange); font-weight: 700; }
     .status-ok { color: var(--teal); font-weight: 700; }
-    .code-box { background: var::ink; color: #fff; padding: 16px; border-radius: 4px; font-family: monospace; font-size: 13px; overflow-x: auto; margin-top: 10px; }
+    .log-error { color: #d66c3c; font-weight: 700; }
+    .log-warn { color: #d69e2e; font-weight: 700; }
+    .log-info { color: #3182ce; font-weight: 700; }
+    .code-box { background: #17252b; color: #fff; padding: 16px; border-radius: 4px; font-family: monospace; font-size: 13px; overflow-x: auto; margin-top: 10px; }
   </style>
 </head>
 <body>
   <main class="shell">
     <header class="topbar">
       <div>
-        <p class="eyebrow">SINGLE-BINARY ENGINE + SQLITE</p>
+        <p class="eyebrow">SINGLE-BINARY OBSERVABILITY ENGINE</p>
         <h1>CloudOps Cockpit</h1>
-        <p class="muted">Zero-config OTLP traces & metrics ingestion engine.</p>
+        <p class="muted">Unified OTLP Traces, Metrics, and Logs Ingestion Engine.</p>
       </div>
       <span class="badge">RUNNING</span>
     </header>
@@ -250,32 +325,52 @@ func getDashboardHTML() string {
       </article>
     </section>
 
-    <section class="panel">
-      <h2>Push OpenTelemetry Data</h2>
-      <p class="muted" style="margin-top: 6px;">Send Spans or Metrics using PowerShell:</p>
+    <article class="panel">
+      <div class="panel-heading">
+        <h2>Structured Logs</h2>
+        <span class="muted">INFO / WARN / ERROR</span>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Time</th><th>Service</th><th>Level</th><th>Message</th></tr>
+        </thead>
+        <tbody id="logs-table">
+          <tr><td colspan="4" style="text-align:center; color: var(--muted);">Loading logs...</td></tr>
+        </tbody>
+      </table>
+    </article>
+
+    <article class="panel">
+      <h2>Push OpenTelemetry Telemetry</h2>
+      <p class="muted" style="margin-top: 6px;">Send Traces, Metrics, or Logs using PowerShell:</p>
       <div class="code-box"># Push Trace Span
 Invoke-RestMethod -Uri "http://localhost:8080/v1/traces" -Method Post -ContentType "application/json" -Body '{"service_name":"checkout-svc","operation_name":"POST /pay","duration_ms":142,"status_code":200}'
 
 # Push Metric Point
-Invoke-RestMethod -Uri "http://localhost:8080/v1/metrics" -Method Post -ContentType "application/json" -Body '{"service_name":"checkout-svc","metric_name":"orders_processed","value":15}'</div>
-    </section>
+Invoke-RestMethod -Uri "http://localhost:8080/v1/metrics" -Method Post -ContentType "application/json" -Body '{"service_name":"checkout-svc","metric_name":"orders_processed","value":15}'
+
+# Push Log Entry
+Invoke-RestMethod -Uri "http://localhost:8080/v1/logs" -Method Post -ContentType "application/json" -Body '{"service_name":"checkout-svc","level":"INFO","message":"Payment completed successfully"}'</div>
+    </article>
   </main>
 
   <script>
     async function fetchData() {
       try {
-        const [tracesRes, metricsRes] = await Promise.all([
+        const [tracesRes, metricsRes, logsRes] = await Promise.all([
           fetch("/api/traces"),
-          fetch("/api/metrics")
+          fetch("/api/metrics"),
+          fetch("/api/logs")
         ]);
         const traces = await tracesRes.json();
         const metrics = await metricsRes.json();
+        const logs = await logsRes.json();
 
         const spansTbody = document.querySelector("#spans-table");
         if (!traces || traces.length === 0) {
           spansTbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--muted);">No traces yet.</td></tr>';
         } else {
-          spansTbody.innerHTML = traces.slice(0, 10).map(function(s) {
+          spansTbody.innerHTML = traces.slice(0, 8).map(function(s) {
             return '<tr>' +
               '<td><span class="tag">' + s.service_name + '</span></td>' +
               '<td><strong>' + s.operation_name + '</strong></td>' +
@@ -289,11 +384,26 @@ Invoke-RestMethod -Uri "http://localhost:8080/v1/metrics" -Method Post -ContentT
         if (!metrics || metrics.length === 0) {
           metricsTbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color: var(--muted);">No metrics yet.</td></tr>';
         } else {
-          metricsTbody.innerHTML = metrics.slice(0, 10).map(function(m) {
+          metricsTbody.innerHTML = metrics.slice(0, 8).map(function(m) {
             return '<tr>' +
               '<td><span class="tag">' + m.service_name + '</span></td>' +
               '<td>' + m.metric_name + '</td>' +
               '<td><strong>' + m.value + '</strong></td>' +
+            '</tr>';
+          }).join("");
+        }
+
+        const logsTbody = document.querySelector("#logs-table");
+        if (!logs || logs.length === 0) {
+          logsTbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--muted);">No logs yet.</td></tr>';
+        } else {
+          logsTbody.innerHTML = logs.slice(0, 8).map(function(l) {
+            var lvlClass = l.level === 'ERROR' ? 'log-error' : (l.level === 'WARN' ? 'log-warn' : 'log-info');
+            return '<tr>' +
+              '<td>' + new Date(l.timestamp).toLocaleTimeString() + '</td>' +
+              '<td><span class="tag">' + l.service_name + '</span></td>' +
+              '<td><span class="' + lvlClass + '">' + l.level + '</span></td>' +
+              '<td>' + l.message + '</td>' +
             '</tr>';
           }).join("");
         }
@@ -329,12 +439,14 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		spans, _ := getSpans()
 		metrics, _ := getMetrics()
+		logs, _ := getLogs()
 		json.NewEncoder(w).Encode(map[string]any{
-			"status":        "healthy",
-			"name":          "CloudOps Observability Platform",
-			"version":       "0.4.0-metrics",
-			"active_spans":  len(spans),
-			"active_metric": len(metrics),
+			"status":         "healthy",
+			"name":           "CloudOps Observability Platform",
+			"version":        "0.5.0-logs",
+			"active_spans":   len(spans),
+			"active_metrics": len(metrics),
+			"active_logs":    len(logs),
 		})
 	})
 
@@ -356,6 +468,16 @@ func main() {
 			return
 		}
 		json.NewEncoder(w).Encode(metrics)
+	})
+
+	mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		logs, err := getLogs()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(logs)
 	})
 
 	mux.HandleFunc("/v1/traces", func(w http.ResponseWriter, r *http.Request) {
@@ -425,12 +547,44 @@ func main() {
 		w.Write([]byte(`{"status":"success"}`))
 	})
 
+	mux.HandleFunc("/v1/logs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+
+		var l LogEntry
+		if err := json.Unmarshal(body, &l); err != nil {
+			l = LogEntry{
+				ServiceName: "external-app",
+				Level:       "INFO",
+				Message:     "Sample log entry",
+				Timestamp:   time.Now(),
+			}
+		}
+
+		if err := addLog(l); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"success"}`))
+	})
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, getDashboardHTML())
 	})
 
-	fmt.Printf("Starting CloudOps Observability Engine (Metrics + Traces) on http://localhost:%s\n", port)
+	fmt.Printf("Starting CloudOps Observability Platform (Traces + Metrics + Logs) on http://localhost:%s\n", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		fmt.Printf("Server failed: %v\n", err)
 	}

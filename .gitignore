@@ -1,5 +1,6 @@
 *.exe
 *.test
 *.prof
+cloudops-cockpit
 telemetry.db
 dist/

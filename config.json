@@ -1,0 +1,5 @@
+{
+  "port": "8080",
+  "db_path": "telemetry.db",
+  "max_records": 100
+}

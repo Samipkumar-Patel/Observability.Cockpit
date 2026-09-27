@@ -12,6 +12,38 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+type Config struct {
+	Port       string `json:"port"`
+	DBPath     string `json:"db_path"`
+	MaxRecords int    `json:"max_records"`
+}
+
+var cfg Config
+
+func loadConfig() {
+	// Default configuration
+	cfg = Config{
+		Port:       "8080",
+		DBPath:     "telemetry.db",
+		MaxRecords: 100,
+	}
+
+	// Check environment variable overrides
+	if p := os.Getenv("PORT"); p != "" {
+		cfg.Port = p
+	}
+	if dbp := os.Getenv("DB_PATH"); dbp != "" {
+		cfg.DBPath = dbp
+	}
+
+	// Load from config.json if present
+	if file, err := os.Open("config.json"); err == nil {
+		defer file.Close()
+		decoder := json.NewDecoder(file)
+		_ = decoder.Decode(&cfg)
+	}
+}
+
 type TraceSpan struct {
 	TraceID       string    `json:"trace_id"`
 	SpanID        string    `json:"span_id"`
@@ -40,7 +72,7 @@ var db *sql.DB
 
 func initDB() error {
 	var err error
-	db, err = sql.Open("sqlite", "telemetry.db")
+	db, err = sql.Open("sqlite", cfg.DBPath)
 	if err != nil {
 		return err
 	}
@@ -118,7 +150,7 @@ func addLog(l LogEntry) error {
 }
 
 func getSpans() ([]TraceSpan, error) {
-	query := `SELECT trace_id, span_id, service_name, operation_name, duration_ms, status_code, timestamp FROM spans ORDER BY timestamp DESC LIMIT 50`
+	query := fmt.Sprintf(`SELECT trace_id, span_id, service_name, operation_name, duration_ms, status_code, timestamp FROM spans ORDER BY timestamp DESC LIMIT %d`, cfg.MaxRecords)
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -145,7 +177,7 @@ func getSpans() ([]TraceSpan, error) {
 }
 
 func getMetrics() ([]MetricPoint, error) {
-	query := `SELECT service_name, metric_name, value, timestamp FROM metrics ORDER BY timestamp DESC LIMIT 50`
+	query := fmt.Sprintf(`SELECT service_name, metric_name, value, timestamp FROM metrics ORDER BY timestamp DESC LIMIT %d`, cfg.MaxRecords)
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -172,7 +204,7 @@ func getMetrics() ([]MetricPoint, error) {
 }
 
 func getLogs() ([]LogEntry, error) {
-	query := `SELECT service_name, level, message, timestamp FROM logs ORDER BY timestamp DESC LIMIT 50`
+	query := fmt.Sprintf(`SELECT service_name, level, message, timestamp FROM logs ORDER BY timestamp DESC LIMIT %d`, cfg.MaxRecords)
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -350,7 +382,7 @@ Invoke-RestMethod -Uri "http://localhost:8080/v1/traces" -Method Post -ContentTy
 Invoke-RestMethod -Uri "http://localhost:8080/v1/metrics" -Method Post -ContentType "application/json" -Body '{"service_name":"checkout-svc","metric_name":"orders_processed","value":15}'
 
 # Push Log Entry
-Invoke-RestMethod -Uri "http://localhost:8080/v1/logs" -Method Post -ContentType "application/json" -Body '{"service_name":"checkout-svc","level":"INFO","message":"Payment completed successfully"}'</div>
+Invoke-RestMethod -Uri "http://localhost:8080/v1/logs" -Method Post -ContentType "application/json" -Body '{"service_name":"checkout-svc","level":"ERROR","message":"Payment completed successfully"}'</div>
     </article>
   </main>
 
@@ -420,6 +452,8 @@ Invoke-RestMethod -Uri "http://localhost:8080/v1/logs" -Method Post -ContentType
 }
 
 func main() {
+	loadConfig()
+
 	if err := initDB(); err != nil {
 		fmt.Printf("Failed to initialize database: %v\n", err)
 		os.Exit(1)
@@ -427,11 +461,6 @@ func main() {
 	defer db.Close()
 
 	seedDemoData()
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
 
 	mux := http.NewServeMux()
 
@@ -443,7 +472,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.5.0-logs",
+			"version":        "0.6.0-config",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),
@@ -584,8 +613,8 @@ func main() {
 		fmt.Fprint(w, getDashboardHTML())
 	})
 
-	fmt.Printf("Starting CloudOps Observability Platform (Traces + Metrics + Logs) on http://localhost:%s\n", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	fmt.Printf("Starting CloudOps Observability Platform on http://localhost:%s (db: %s)\n", cfg.Port, cfg.DBPath)
+	if err := http.ListenAndServe(":"+cfg.Port, mux); err != nil {
 		fmt.Printf("Server failed: %v\n", err)
 	}
 }

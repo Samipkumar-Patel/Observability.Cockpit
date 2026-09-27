@@ -21,14 +21,12 @@ type Config struct {
 var cfg Config
 
 func loadConfig() {
-	// Default configuration
 	cfg = Config{
 		Port:       "8080",
 		DBPath:     "telemetry.db",
 		MaxRecords: 100,
 	}
 
-	// Check environment variable overrides
 	if p := os.Getenv("PORT"); p != "" {
 		cfg.Port = p
 	}
@@ -36,7 +34,6 @@ func loadConfig() {
 		cfg.DBPath = dbp
 	}
 
-	// Load from config.json if present
 	if file, err := os.Open("config.json"); err == nil {
 		defer file.Close()
 		decoder := json.NewDecoder(file)
@@ -285,51 +282,111 @@ func seedDemoData() {
 
 func getDashboardHTML() string {
 	return `<!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CloudOps Observability Platform</title>
   <style>
-    :root { --ink: #17252b; --muted: #718087; --line: #dce5e3; --paper: #f5f7f4; --panel: #fff; --teal: #147d76; --orange: #d66c3c; }
+    :root {
+      --ink: #17252b; --muted: #718087; --line: #dce5e3; --paper: #f5f7f4; --panel: #fff;
+      --teal: #147d76; --orange: #d66c3c; --hover: #f1f5f3;
+    }
+    [data-theme="dark"] {
+      --ink: #f0f4f8; --muted: #9aa5b1; --line: #2d3748; --paper: #111822; --panel: #1a2332;
+      --teal: #319795; --orange: #ed8936; --hover: #222d3f;
+    }
     * { box-sizing: border-box; }
-    body { margin: 0; color: var(--ink); background: var(--paper); font: 15px/1.5 system-ui, sans-serif; }
-    .shell { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
-    .topbar { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 30px; }
+    body { margin: 0; color: var(--ink); background: var(--paper); font: 15px/1.5 system-ui, sans-serif; transition: background 0.2s, color 0.2s; }
+    .shell { max-width: 1280px; margin: 0 auto; padding: 40px 20px; }
+    .topbar { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
     h1, h2, p { margin: 0; } h1 { font-size: 32px; letter-spacing: -.03em; }
     .eyebrow { color: var(--teal); font-size: 11px; font-weight: 800; letter-spacing: .12em; margin-bottom: 6px; }
-    .badge { background: #e2f0ea; color: var(--teal); border-radius: 99px; padding: 6px 12px; font-size: 11px; font-weight: 800; }
+    .badge-group { display: flex; gap: 10px; align-items: center; }
+    .badge { background: var(--panel); border: 1px solid var(--line); color: var(--teal); border-radius: 99px; padding: 6px 14px; font-size: 11px; font-weight: 800; }
+    .theme-btn { background: var(--panel); border: 1px solid var(--line); color: var(--ink); border-radius: 99px; padding: 6px 14px; font-size: 11px; font-weight: 800; cursor: pointer; }
+    
+    /* KPI Summary Cards */
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .kpi-card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 18px; }
+    .kpi-card .label { color: var(--muted); font-size: 11px; text-transform: uppercase; font-weight: 700; letter-spacing: .08em; }
+    .kpi-card .value { font-size: 26px; font-weight: 700; margin-top: 6px; color: var(--ink); }
+
+    /* Search Bar Toolbar */
+    .toolbar { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 20px; margin-bottom: 24px; display: flex; gap: 16px; align-items: center; }
+    .search-input { flex: 1; padding: 10px 14px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); font: inherit; outline: none; }
+
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
     .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 24px; margin-bottom: 20px; }
     .panel-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
     table { width: 100%; border-collapse: collapse; text-align: left; }
     th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; padding: 10px; border-bottom: 1px solid var(--line); }
-    td { padding: 12px 10px; border-bottom: 1px solid var(--line); font-size: 14px; }
-    .tag { background: #e8efeb; color: var(--teal); padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+    td { padding: 12px 10px; border-bottom: 1px solid var(--line); font-size: 14px; cursor: pointer; }
+    tbody tr:hover { background: var(--hover); }
+    .tag { background: var(--paper); border: 1px solid var(--line); color: var(--teal); padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
     .status-error { color: var(--orange); font-weight: 700; }
     .status-ok { color: var(--teal); font-weight: 700; }
-    .log-error { color: #d66c3c; font-weight: 700; }
+    .log-error { color: var(--orange); font-weight: 700; }
     .log-warn { color: #d69e2e; font-weight: 700; }
     .log-info { color: #3182ce; font-weight: 700; }
-    .code-box { background: #17252b; color: #fff; padding: 16px; border-radius: 4px; font-family: monospace; font-size: 13px; overflow-x: auto; margin-top: 10px; }
+
+    /* Modal */
+    .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 100; }
+    .modal-overlay.active { display: flex; }
+    .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; width: 600px; max-width: 90%; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .modal-close { background: none; border: none; font-size: 20px; color: var(--ink); cursor: pointer; }
+    .code-view { background: var(--paper); border: 1px solid var(--line); color: var(--ink); padding: 14px; border-radius: 4px; font-family: monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; max-height: 350px; overflow-y: auto; }
+    
+    .code-box { background: #111822; color: #a5f3fc; padding: 16px; border-radius: 4px; font-family: monospace; font-size: 13px; overflow-x: auto; margin-top: 10px; }
+    
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
   </style>
 </head>
 <body>
   <main class="shell">
     <header class="topbar">
       <div>
-        <p class="eyebrow">SINGLE-BINARY OBSERVABILITY ENGINE</p>
+        <p class="eyebrow">ENTERPRISE OBSERVABILITY ENGINE</p>
         <h1>CloudOps Cockpit</h1>
-        <p class="muted">Unified OTLP Traces, Metrics, and Logs Ingestion Engine.</p>
+        <p class="muted">Unified OTLP Traces, Metrics, and Logs Console.</p>
       </div>
-      <span class="badge">RUNNING</span>
+      <div class="badge-group">
+        <button class="theme-btn" onclick="toggleTheme()">🌓 Theme</button>
+        <span class="badge">LIVE ENGINE</span>
+      </div>
     </header>
+
+    <!-- KPI Summary Cards -->
+    <section class="kpi-grid">
+      <div class="kpi-card">
+        <div class="label">Total Traces</div>
+        <div class="value" id="kpi-traces">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="label">Error Rate</div>
+        <div class="value" id="kpi-errors">0%</div>
+      </div>
+      <div class="kpi-card">
+        <div class="label">Active Services</div>
+        <div class="value" id="kpi-services">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="label">Total Logs</div>
+        <div class="value" id="kpi-logs">0</div>
+      </div>
+    </section>
+
+    <!-- Search & Filter Toolbar -->
+    <section class="toolbar">
+      <input type="text" id="search-box" class="search-input" placeholder="🔍 Filter traces, metrics, or logs by service name or keyword..." oninput="filterData()">
+    </section>
 
     <section class="grid">
       <article class="panel" style="margin-bottom:0;">
         <div class="panel-heading">
           <h2>Live Traces</h2>
-          <span class="muted">Refreshes every 3s</span>
+          <span class="muted" id="trace-count">0 items</span>
         </div>
         <table>
           <thead>
@@ -344,7 +401,7 @@ func getDashboardHTML() string {
       <article class="panel" style="margin-bottom:0;">
         <div class="panel-heading">
           <h2>Metrics Stream</h2>
-          <span class="muted">Counters & Gauges</span>
+          <span class="muted" id="metric-count">0 items</span>
         </div>
         <table>
           <thead>
@@ -360,7 +417,7 @@ func getDashboardHTML() string {
     <article class="panel">
       <div class="panel-heading">
         <h2>Structured Logs</h2>
-        <span class="muted">INFO / WARN / ERROR</span>
+        <span class="muted" id="log-count">0 items</span>
       </div>
       <table>
         <thead>
@@ -371,22 +428,33 @@ func getDashboardHTML() string {
         </tbody>
       </table>
     </article>
-
-    <article class="panel">
-      <h2>Push OpenTelemetry Telemetry</h2>
-      <p class="muted" style="margin-top: 6px;">Send Traces, Metrics, or Logs using PowerShell:</p>
-      <div class="code-box"># Push Trace Span
-Invoke-RestMethod -Uri "http://localhost:8080/v1/traces" -Method Post -ContentType "application/json" -Body '{"service_name":"checkout-svc","operation_name":"POST /pay","duration_ms":142,"status_code":200}'
-
-# Push Metric Point
-Invoke-RestMethod -Uri "http://localhost:8080/v1/metrics" -Method Post -ContentType "application/json" -Body '{"service_name":"checkout-svc","metric_name":"orders_processed","value":15}'
-
-# Push Log Entry
-Invoke-RestMethod -Uri "http://localhost:8080/v1/logs" -Method Post -ContentType "application/json" -Body '{"service_name":"checkout-svc","level":"ERROR","message":"Payment completed successfully"}'</div>
-    </article>
   </main>
 
+  <!-- Interactive Detail Modal -->
+  <div class="modal-overlay" id="detail-modal" onclick="closeModal(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 id="modal-title">Telemetry Details</h3>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <div class="code-view" id="modal-content"></div>
+    </div>
+  </div>
+
   <script>
+    let globalData = { traces: [], metrics: [], logs: [] };
+
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute("data-theme");
+      const next = current === "dark" ? "light" : "dark";
+      html.setAttribute("data-theme", next);
+      localStorage.setItem("cloudops-theme", next);
+    }
+
+    const savedTheme = localStorage.getItem("cloudops-theme") || "light";
+    document.documentElement.setAttribute("data-theme", savedTheme);
+
     async function fetchData() {
       try {
         const [tracesRes, metricsRes, logsRes] = await Promise.all([
@@ -394,54 +462,99 @@ Invoke-RestMethod -Uri "http://localhost:8080/v1/logs" -Method Post -ContentType
           fetch("/api/metrics"),
           fetch("/api/logs")
         ]);
-        const traces = await tracesRes.json();
-        const metrics = await metricsRes.json();
-        const logs = await logsRes.json();
-
-        const spansTbody = document.querySelector("#spans-table");
-        if (!traces || traces.length === 0) {
-          spansTbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--muted);">No traces yet.</td></tr>';
-        } else {
-          spansTbody.innerHTML = traces.slice(0, 8).map(function(s) {
-            return '<tr>' +
-              '<td><span class="tag">' + s.service_name + '</span></td>' +
-              '<td><strong>' + s.operation_name + '</strong></td>' +
-              '<td>' + s.duration_ms + ' ms</td>' +
-              '<td><span class="' + (s.status_code >= 400 ? 'status-error' : 'status-ok') + '">' + s.status_code + '</span></td>' +
-            '</tr>';
-          }).join("");
-        }
-
-        const metricsTbody = document.querySelector("#metrics-table");
-        if (!metrics || metrics.length === 0) {
-          metricsTbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color: var(--muted);">No metrics yet.</td></tr>';
-        } else {
-          metricsTbody.innerHTML = metrics.slice(0, 8).map(function(m) {
-            return '<tr>' +
-              '<td><span class="tag">' + m.service_name + '</span></td>' +
-              '<td>' + m.metric_name + '</td>' +
-              '<td><strong>' + m.value + '</strong></td>' +
-            '</tr>';
-          }).join("");
-        }
-
-        const logsTbody = document.querySelector("#logs-table");
-        if (!logs || logs.length === 0) {
-          logsTbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--muted);">No logs yet.</td></tr>';
-        } else {
-          logsTbody.innerHTML = logs.slice(0, 8).map(function(l) {
-            var lvlClass = l.level === 'ERROR' ? 'log-error' : (l.level === 'WARN' ? 'log-warn' : 'log-info');
-            return '<tr>' +
-              '<td>' + new Date(l.timestamp).toLocaleTimeString() + '</td>' +
-              '<td><span class="tag">' + l.service_name + '</span></td>' +
-              '<td><span class="' + lvlClass + '">' + l.level + '</span></td>' +
-              '<td>' + l.message + '</td>' +
-            '</tr>';
-          }).join("");
-        }
+        globalData.traces = await tracesRes.json() || [];
+        globalData.metrics = await metricsRes.json() || [];
+        globalData.logs = await logsRes.json() || [];
+        
+        updateKPIs();
+        renderTables(globalData);
       } catch (err) {
         console.error("Failed to load telemetry data", err);
       }
+    }
+
+    function updateKPIs() {
+      const totalTraces = globalData.traces.length;
+      const errorTraces = globalData.traces.filter(s => s.status_code >= 400).length;
+      const errorRate = totalTraces > 0 ? ((errorTraces / totalTraces) * 100).toFixed(1) + "%" : "0%";
+      
+      const services = new Set([
+        ...globalData.traces.map(s => s.service_name),
+        ...globalData.metrics.map(m => m.service_name),
+        ...globalData.logs.map(l => l.service_name)
+      ]);
+
+      document.querySelector("#kpi-traces").textContent = totalTraces;
+      document.querySelector("#kpi-errors").textContent = errorRate;
+      document.querySelector("#kpi-services").textContent = services.size;
+      document.querySelector("#kpi-logs").textContent = globalData.logs.length;
+    }
+
+    function filterData() {
+      const q = document.querySelector("#search-box").value.toLowerCase();
+      const filteredTraces = globalData.traces.filter(s => s.service_name.toLowerCase().includes(q) || s.operation_name.toLowerCase().includes(q));
+      const filteredMetrics = globalData.metrics.filter(m => m.service_name.toLowerCase().includes(q) || m.metric_name.toLowerCase().includes(q));
+      const filteredLogs = globalData.logs.filter(l => l.service_name.toLowerCase().includes(q) || l.message.toLowerCase().includes(q) || l.level.toLowerCase().includes(q));
+      
+      renderTables({ traces: filteredTraces, metrics: filteredMetrics, logs: filteredLogs });
+    }
+
+    function renderTables(data) {
+      document.querySelector("#trace-count").textContent = data.traces.length + " items";
+      document.querySelector("#metric-count").textContent = data.metrics.length + " items";
+      document.querySelector("#log-count").textContent = data.logs.length + " items";
+
+      const spansTbody = document.querySelector("#spans-table");
+      if (data.traces.length === 0) {
+        spansTbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--muted);">No matching traces.</td></tr>';
+      } else {
+        spansTbody.innerHTML = data.traces.slice(0, 10).map(function(s) {
+          return '<tr onclick=\'showDetails("Trace Span", ' + JSON.stringify(s) + ')\'>' +
+            '<td><span class="tag">' + s.service_name + '</span></td>' +
+            '<td><strong>' + s.operation_name + '</strong></td>' +
+            '<td>' + s.duration_ms + ' ms</td>' +
+            '<td><span class="' + (s.status_code >= 400 ? 'status-error' : 'status-ok') + '">' + s.status_code + '</span></td>' +
+          '</tr>';
+        }).join("");
+      }
+
+      const metricsTbody = document.querySelector("#metrics-table");
+      if (data.metrics.length === 0) {
+        metricsTbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color: var(--muted);">No matching metrics.</td></tr>';
+      } else {
+        metricsTbody.innerHTML = data.metrics.slice(0, 10).map(function(m) {
+          return '<tr onclick=\'showDetails("Metric Point", ' + JSON.stringify(m) + ')\'>' +
+            '<td><span class="tag">' + m.service_name + '</span></td>' +
+            '<td>' + m.metric_name + '</td>' +
+            '<td><strong>' + m.value + '</strong></td>' +
+          '</tr>';
+        }).join("");
+      }
+
+      const logsTbody = document.querySelector("#logs-table");
+      if (data.logs.length === 0) {
+        logsTbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--muted);">No matching logs.</td></tr>';
+      } else {
+        logsTbody.innerHTML = data.logs.slice(0, 10).map(function(l) {
+          var lvlClass = l.level === 'ERROR' ? 'log-error' : (l.level === 'WARN' ? 'log-warn' : 'log-info');
+          return '<tr onclick=\'showDetails("Log Entry", ' + JSON.stringify(l) + ')\'>' +
+            '<td>' + new Date(l.timestamp).toLocaleTimeString() + '</td>' +
+            '<td><span class="tag">' + l.service_name + '</span></td>' +
+            '<td><span class="' + lvlClass + '">' + l.level + '</span></td>' +
+            '<td>' + l.message + '</td>' +
+          '</tr>';
+        }).join("");
+      }
+    }
+
+    function showDetails(title, obj) {
+      document.querySelector("#modal-title").textContent = title + " Details";
+      document.querySelector("#modal-content").textContent = JSON.stringify(obj, null, 2);
+      document.querySelector("#detail-modal").classList.add("active");
+    }
+
+    function closeModal() {
+      document.querySelector("#detail-modal").classList.remove("active");
     }
 
     fetchData();
@@ -472,7 +585,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.6.0-config",
+			"version":        "0.7.0-enhanced-gui",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),

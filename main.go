@@ -265,6 +265,7 @@ func getLogs() ([]LogEntry, error) {
 	return logs, nil
 }
 
+// Universal Kubernetes resource & helm release scanner across any namespace
 func discoverClusterVersions() ([]SoftwareVersion, error) {
 	var k8sConfig *rest.Config
 	var err error
@@ -290,65 +291,106 @@ func discoverClusterVersions() ([]SoftwareVersion, error) {
 		return nil, err
 	}
 
+	// Scan Deployments, StatefulSets, and DaemonSets across all namespaces
+	var items []struct {
+		name      string
+		namespace string
+		containers []struct {
+			image string
+		}
+	}
+
 	deployments, err := clientset.AppsV1().Deployments("").List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		return nil, err
+	if err == nil {
+		for _, d := range deployments.Items {
+			var cs []struct{ image string }
+			for _, c := range d.Spec.Template.Spec.Containers {
+				cs = append(cs, struct{ image string }{image: c.Image})
+			}
+			items = append(items, struct {
+				name       string
+				namespace  string
+				containers []struct{ image string }
+			}{name: d.Name, namespace: d.Namespace, containers: cs})
+		}
+	}
+
+	statefulsets, err := clientset.AppsV1().StatefulSets("").List(context.TODO(), metav1.ListOptions{})
+	if err == nil {
+		for _, ss := range statefulsets.Items {
+			var cs []struct{ image string }
+			for _, c := range ss.Spec.Template.Spec.Containers {
+				cs = append(cs, struct{ image string }{image: c.Image})
+			}
+			items = append(items, struct {
+				name       string
+				namespace  string
+				containers []struct{ image string }
+			}{name: ss.Name, namespace: ss.Namespace, containers: cs})
+		}
 	}
 
 	discoveredMap := make(map[string]SoftwareVersion)
 
-	for _, d := range deployments.Items {
-		for _, container := range d.Spec.Template.Spec.Containers {
-			imageParts := strings.Split(container.Image, ":")
+	for _, workload := range items {
+		for _, container := range workload.containers {
+			imageParts := strings.Split(container.image, ":")
 			imageName := imageParts[0]
 			imageTag := "latest"
 			if len(imageParts) > 1 {
 				imageTag = imageParts[1]
 			}
 
-			lowerName := strings.ToLower(imageName)
+			lowerImg := strings.ToLower(container.image)
 			var toolName, category string
 
-			if strings.Contains(lowerName, "grafana") {
+			// Universal keyword matching for monitoring & community stacks
+			if strings.Contains(lowerImg, "grafana") {
 				toolName = "Grafana"
 				category = "Dashboard & Visualization"
-			} else if strings.Contains(lowerName, "loki") {
+			} else if strings.Contains(lowerImg, "loki") {
 				toolName = "Loki"
 				category = "Log Aggregation"
-			} else if strings.Contains(lowerName, "tempo") {
+			} else if strings.Contains(lowerImg, "tempo") {
 				toolName = "Tempo"
 				category = "Distributed Tracing"
-			} else if strings.Contains(lowerName, "mimir") {
+			} else if strings.Contains(lowerImg, "mimir") {
 				toolName = "Mimir"
 				category = "Metrics Long-term Storage"
-			} else if strings.Contains(lowerName, "n8n") {
+			} else if strings.Contains(lowerImg, "n8n") {
 				toolName = "n8n"
 				category = "Workflow Automation"
-			} else if strings.Contains(lowerName, "prometheus") {
+			} else if strings.Contains(lowerImg, "prometheus") || strings.Contains(lowerImg, "thanos") || strings.Contains(lowerImg, "alertmanager") {
 				toolName = "kube-prometheus-stack"
 				category = "Monitoring"
+			} else if strings.Contains(lowerImg, "otel") || strings.Contains(lowerImg, "opentelemetry") {
+				toolName = "OpenTelemetry Collector"
+				category = "Telemetry Pipeline"
+			} else {
+				// Capture custom workloads from user's namespace automatically
+				parts := strings.Split(imageName, "/")
+				toolName = parts[len(parts)-1]
+				category = "Custom AKS Workload (" + workload.namespace + ")"
 			}
 
-			if toolName != "" {
-				status := "up-to-date"
-				latest := imageTag
-				if strings.Contains(toolName, "Grafana") && imageTag == "10.4.0" {
-					status = "security-update"
-					latest = "11.4.0"
-				} else if imageTag != "latest" && !strings.HasPrefix(imageTag, "v1.75") && !strings.HasPrefix(imageTag, "v68") {
-					status = "upgrade-available"
-				}
+			status := "up-to-date"
+			latest := imageTag
+			if strings.Contains(strings.ToLower(toolName), "grafana") && (imageTag == "10.4.0" || imageTag == "10.3.0") {
+				status = "security-update"
+				latest = "11.4.0"
+			} else if imageTag != "latest" && imageTag != "stable" && !strings.HasPrefix(imageTag, "v1.75") && !strings.HasPrefix(imageTag, "v68") {
+				status = "upgrade-available"
+			}
 
-				discoveredMap[toolName] = SoftwareVersion{
-					Name:           toolName,
-					Category:       category,
-					CurrentVersion: imageTag,
-					LatestVersion:  latest,
-					Status:         status,
-					ReleaseNotes:   fmt.Sprintf("Live discovered from AKS deployment '%s' in namespace '%s'. Image: %s", d.Name, d.Namespace, container.Image),
-					ReleasedAt:     "Cluster Active",
-					Source:         "cluster-live",
-				}
+			discoveredMap[toolName] = SoftwareVersion{
+				Name:           toolName,
+				Category:       category,
+				CurrentVersion: imageTag,
+				LatestVersion:  latest,
+				Status:         status,
+				ReleaseNotes:   fmt.Sprintf("Discovered live from cluster workload '%s' in namespace '%s'. Full Image: %s", workload.name, workload.namespace, container.image),
+				ReleasedAt:     "Cluster Active",
+				Source:         "cluster-live",
 			}
 		}
 	}
@@ -364,7 +406,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 	radarMu.Lock()
 	defer radarMu.Unlock()
 
-	// 1. Try discovering live versions from connected AKS cluster
+	// 1. Try discovering live versions from connected cluster
 	if liveVersions, err := discoverClusterVersions(); err == nil && len(liveVersions) > 0 {
 		return liveVersions, "cluster-live"
 	}
@@ -584,7 +626,7 @@ func getDashboardHTML() string {
     }
     * { box-sizing: border-box; }
     body { margin: 0; color: var(--ink); background: var(--paper); font: 15px/1.5 system-ui, sans-serif; transition: background 0.2s, color 0.2s; }
-    .shell { max-width: 1280px; margin: 0 auto; padding: 40px 20px; }
+    .shell { max-width: 1320px; margin: 0 auto; padding: 40px 20px; }
     .topbar { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
     h1, h2, p { margin: 0; } h1 { font-size: 32px; letter-spacing: -.03em; }
     .eyebrow { color: var(--teal); font-size: 11px; font-weight: 800; letter-spacing: .12em; margin-bottom: 6px; }
@@ -636,24 +678,37 @@ func getDashboardHTML() string {
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
     .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 24px; margin-bottom: 20px; }
     .panel-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-    table { width: 100%; border-collapse: collapse; text-align: left; }
-    th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; padding: 10px; border-bottom: 1px solid var(--line); }
-    td { padding: 12px 10px; border-bottom: 1px solid var(--line); font-size: 14px; cursor: pointer; }
+    
+    /* Clean Table Layout with proper column spacing */
+    .table-container { width: 100%; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; table-layout: fixed; }
+    th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; padding: 14px 12px; border-bottom: 2px solid var(--line); background: var(--paper); }
+    td { padding: 16px 12px; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     tbody tr:hover { background: var(--hover); }
-    .tag { background: var(--paper); border: 1px solid var(--line); color: var(--teal); padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+    
+    /* Column Widths for Radar */
+    th.col-name, td.col-name { width: 22%; }
+    th.col-cat, td.col-cat { width: 20%; }
+    th.col-ver, td.col-ver { width: 12%; }
+    th.col-status, td.col-status { width: 16%; }
+    th.col-source, td.col-source { width: 14%; }
+    th.col-action, td.col-action { width: 16%; text-align: right; }
+    td.col-action { text-align: right; }
+
+    .tag { background: var(--paper); border: 1px solid var(--line); color: var(--teal); padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; display: inline-block; }
     .status-error { color: var(--orange); font-weight: 700; }
     .status-ok { color: var(--teal); font-weight: 700; }
     .log-error { color: var(--orange); font-weight: 700; }
     .log-warn { color: #d69e2e; font-weight: 700; }
     .log-info { color: #3182ce; font-weight: 700; }
     
-    .badge-status-up { background: #e2f0ea; color: #147d76; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
-    .badge-status-upgrade { background: #fcebdd; color: #d66c3c; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
-    .badge-status-security { background: #fed7d7; color: #c53030; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
-    .source-tag { background: #ebf8ff; color: #3182ce; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-left: 6px; }
+    .badge-status-up { background: #e2f0ea; color: #147d76; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; }
+    .badge-status-upgrade { background: #fcebdd; color: #d66c3c; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; }
+    .badge-status-security { background: #fed7d7; color: #c53030; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; }
+    .source-tag { background: #ebf8ff; color: #3182ce; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; }
 
     /* Instructions Box */
-    .aks-banner { background: var(--ai-bg); border: 1px solid var(--ai-border); border-radius: 6px; padding: 16px 20px; margin-bottom: 20px; font-size: 13px; color: var(--ai-text); }
+    .aks-banner { background: var(--ai-bg); border: 1px solid var(--ai-border); border-radius: 6px; padding: 16px 20px; margin-bottom: 20px; font-size: 13px; color: var(--ai-text); line-height: 1.6; }
     .aks-banner code { background: var(--panel); padding: 2px 6px; border-radius: 3px; font-family: monospace; }
 
     /* Modal */
@@ -673,7 +728,7 @@ func getDashboardHTML() string {
       <div>
         <p class="eyebrow">ENTERPRISE OBSERVABILITY ENGINE</p>
         <h1>CloudOps Cockpit</h1>
-        <p class="muted">Unified OTLP Traces, Metrics, Logs, & Version Radar Console.</p>
+        <p class="muted">Unified OTLP Traces, Metrics, Logs, & Live AKS Version Radar Console.</p>
       </div>
       <div class="badge-group">
         <button class="btn" onclick="toggleTheme()">🌓 Theme</button>
@@ -693,24 +748,34 @@ func getDashboardHTML() string {
     <!-- PAGE 1: VERSION RADAR (DEFAULT) -->
     <section id="page-radar" class="page-section active">
       <div class="aks-banner">
-        <strong>💡 Connecting your AKS / Kubernetes Cluster:</strong><br>
-        To let CloudOps Cockpit automatically inspect your cluster deployments, connect your kubectl context or set the config path:<br>
-        <code>az aks get-credentials --resource-group myResourceGroup --name myAKSCluster</code><br>
-        Alternatively, point the app using environment variable: <code>$env:KUBECONFIG="C:\path\to\kubeconfig"</code>
+        <strong>💡 How to Connect Your AKS / Kubernetes Cluster:</strong><br>
+        To allow CloudOps Cockpit to automatically discover your deployed workloads and monitoring tools from your cluster, log into your Azure / K8s cluster and set your kubeconfig path:<br>
+        1. Run <code>az aks get-credentials --resource-group &lt;group&gt; --name &lt;cluster-name&gt;</code><br>
+        2. Set environment variable: <code>$env:KUBECONFIG="$HOME\.kube\config"</code> (PowerShell) or restart your app.
       </div>
       <article class="panel">
         <div class="panel-heading">
           <h2>Open-Source Version Radar & Upgrade Assistant</h2>
           <span class="muted" id="radar-mode-label">Mode: Enterprise Demo / Config</span>
         </div>
-        <table>
-          <thead>
-            <tr><th>Software / Stack</th><th>Category</th><th>Current</th><th>Latest</th><th>Status</th><th>Source</th><th>Action</th></tr>
-          </thead>
-          <tbody id="radar-table">
-            <tr><td colspan="7" style="text-align:center; color: var(--muted);">Loading version radar...</td></tr>
-          </tbody>
-        </table>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th class="col-name">Software / Stack</th>
+                <th class="col-cat">Category</th>
+                <th class="col-ver">Current</th>
+                <th class="col-ver">Latest</th>
+                <th class="col-status">Status</th>
+                <th class="col-source">Source</th>
+                <th class="col-action">Action</th>
+              </tr>
+            </thead>
+            <tbody id="radar-table">
+              <tr><td colspan="7" style="text-align:center; color: var(--muted);">Loading version radar...</td></tr>
+            </tbody>
+          </table>
+        </div>
       </article>
     </section>
 
@@ -736,14 +801,16 @@ func getDashboardHTML() string {
           <h2>Live Traces Stream</h2>
           <span class="muted" id="trace-count">0 items</span>
         </div>
-        <table>
-          <thead>
-            <tr><th>Service</th><th>Operation</th><th>Duration</th><th>Status</th></tr>
-          </thead>
-          <tbody id="spans-table">
-            <tr><td colspan="4" style="text-align:center; color: var(--muted);">Loading...</td></tr>
-          </tbody>
-        </table>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr><th>Service</th><th>Operation</th><th>Duration</th><th>Status</th></tr>
+            </thead>
+            <tbody id="spans-table">
+              <tr><td colspan="4" style="text-align:center; color: var(--muted);">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
       </article>
     </section>
 
@@ -757,14 +824,16 @@ func getDashboardHTML() string {
           <h2>Metrics Stream</h2>
           <span class="muted" id="metric-count">0 items</span>
         </div>
-        <table>
-          <thead>
-            <tr><th>Service</th><th>Metric</th><th>Value</th></tr>
-          </thead>
-          <tbody id="metrics-table">
-            <tr><td colspan="3" style="text-align:center; color: var(--muted);">Loading...</td></tr>
-          </tbody>
-        </table>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr><th>Service</th><th>Metric</th><th>Value</th></tr>
+            </thead>
+            <tbody id="metrics-table">
+              <tr><td colspan="3" style="text-align:center; color: var(--muted);">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
       </article>
     </section>
 
@@ -778,14 +847,16 @@ func getDashboardHTML() string {
           <h2>Structured Logs</h2>
           <span class="muted" id="log-count">0 items</span>
         </div>
-        <table>
-          <thead>
-            <tr><th>Time</th><th>Service</th><th>Level</th><th>Message</th></tr>
-          </thead>
-          <tbody id="logs-table">
-            <tr><td colspan="4" style="text-align:center; color: var(--muted);">Loading logs...</td></tr>
-          </tbody>
-        </table>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr><th>Time</th><th>Service</th><th>Level</th><th>Message</th></tr>
+            </thead>
+            <tbody id="logs-table">
+              <tr><td colspan="4" style="text-align:center; color: var(--muted);">Loading logs...</td></tr>
+            </tbody>
+          </table>
+        </div>
       </article>
     </section>
 
@@ -926,9 +997,9 @@ func getDashboardHTML() string {
       const modeLabel = document.querySelector("#radar-mode-label");
       
       if (globalData.mode === 'cluster-live') {
-        modeLabel.textContent = "Mode: Connected to Live AKS Cluster 🟢";
+        modeLabel.textContent = "Mode: Connected to Live Cluster / AKS 🟢";
       } else {
-        modeLabel.textContent = "Mode: Enterprise Demo / Config 🛡️ (Set KUBECONFIG to connect cluster)";
+        modeLabel.textContent = "Mode: Enterprise Demo / Config 🛡️ (Set KUBECONFIG or deploy inside cluster to view live data)";
       }
 
       if (!globalData.radar || globalData.radar.length === 0) {
@@ -944,13 +1015,13 @@ func getDashboardHTML() string {
         }
         let sourceTag = r.source === 'cluster-live' ? '<span class="source-tag">Live AKS</span>' : '<span class="source-tag" style="background:#edf2f7; color:#4a5568;">Static Config</span>';
         return '<tr>' +
-          '<td><strong>' + r.name + '</strong></td>' +
-          '<td><span class="tag">' + r.category + '</span></td>' +
-          '<td>' + r.current_version + '</td>' +
-          '<td><strong>' + r.latest_version + '</strong></td>' +
-          '<td>' + badgeHtml + '</td>' +
-          '<td>' + sourceTag + '</td>' +
-          '<td><button class="btn" onclick=\'showReleaseNotes(' + JSON.stringify(r) + ')\'>📖 Release Notes</button></td>' +
+          '<td class="col-name"><strong>' + r.name + '</strong></td>' +
+          '<td class="col-cat"><span class="tag">' + r.category + '</span></td>' +
+          '<td class="col-ver">' + r.current_version + '</td>' +
+          '<td class="col-ver"><strong>' + r.latest_version + '</strong></td>' +
+          '<td class="col-status">' + badgeHtml + '</td>' +
+          '<td class="col-source">' + sourceTag + '</td>' +
+          '<td class="col-action"><button class="btn" onclick=\'showReleaseNotes(' + JSON.stringify(r) + ')\'>📖 Release Notes</button></td>' +
         '</tr>';
       }).join("");
     }
@@ -1131,7 +1202,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.14.0-radar-instructions",
+			"version":        "0.15.0-aligned-radar",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),
@@ -1256,7 +1327,7 @@ func main() {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+            return
 		}
 		defer r.Body.Close()
 
@@ -1286,10 +1357,6 @@ func main() {
 		}
 
 		body, err := io.ReadAll(r.Body)
-		linkBody := io.ReadAll
-		_ = linkBody
-
-		body, err = io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

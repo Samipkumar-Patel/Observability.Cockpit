@@ -1,27 +1,18 @@
 package main
 
 import (
-	"bytes"
-	"compress/gzip"
-	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 type Config struct {
@@ -271,136 +262,79 @@ func getLogs() ([]LogEntry, error) {
 	return logs, nil
 }
 
-// Read-only discovery of Helm release secrets in the 'monitoring' namespace with actual chart version decoding
+// Read-only discovery using native `helm ls -n monitoring -o json` command
 func discoverClusterHelmReleases() ([]SoftwareVersion, error) {
-	var k8sConfig *rest.Config
-	var err error
-
-	k8sConfig, err = rest.InClusterConfig()
-	if err != nil {
-		kubeconfig := cfg.Kubeconfig
-		if kubeconfig == "" {
-			if home := os.Getenv("USERPROFILE"); home != "" {
-				kubeconfig = filepath.Join(home, ".kube", "config")
-			} else if home := os.Getenv("HOME"); home != "" {
-				kubeconfig = filepath.Join(home, ".kube", "config")
-			}
-		}
-		k8sConfig, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	clientset, err := kubernetes.NewForConfig(k8sConfig)
-	if err != nil {
-		return nil, err
-	}
-
 	targetNamespace := os.Getenv("MONITORING_NAMESPACE")
 	if targetNamespace == "" {
 		targetNamespace = "monitoring"
 	}
 
-	// Read-only: List secrets matching Helm release structure (owner=helm, status=deployed)
-	secrets, err := clientset.CoreV1().Secrets(targetNamespace).List(context.TODO(), metav1.ListOptions{
-		LabelSelector: "owner=helm,status=deployed",
-	})
-	if err != nil || len(secrets.Items) == 0 {
+	cmdArgs := []string{"ls", "-n", targetNamespace, "-o", "json"}
+	if cfg.Kubeconfig != "" {
+		cmdArgs = append(cmdArgs, "--kubeconfig", cfg.Kubeconfig)
+	}
+
+	cmd := exec.Command("helm", cmdArgs...)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute helm ls: %v", err)
+	}
+
+	var releases []struct {
+		Name       string `json:"name"`
+		Namespace  string `json:"namespace"`
+		Revision   string `json:"revision"`
+		Updated    string `json:"updated"`
+		Status     string `json:"status"`
+		Chart      string `json:"chart"`
+		AppVersion string `json:"app_version"`
+	}
+
+	if err := json.Unmarshal(output, &releases); err != nil {
+		return nil, fmt.Errorf("failed to parse helm ls json output: %v", err)
+	}
+
+	if len(releases) == 0 {
 		return nil, fmt.Errorf("no helm releases found in namespace %s", targetNamespace)
 	}
 
-	discoveredMap := make(map[string]SoftwareVersion)
-
-	for _, secret := range secrets.Items {
-		releaseName := secret.Labels["name"]
-		if releaseName == "" {
-			releaseName = secret.Name
-		}
-
-		rawRelease := secret.Data["release"]
-		if len(rawRelease) == 0 {
-			continue
-		}
-
-		// Helm stores base64-encoded gzipped data in secrets
-		// We decode base64 first
-		decoded, err := base64.StdEncoding.DecodeString(string(rawRelease))
-		if err != nil {
-			// If not base64, try raw bytes
-			decoded = rawRelease
-		}
-
-		// Try to gunzip if compressed
-		var chartName, chartVersion, appVersion string
-		if gz, err := gzip.NewReader(bytes.NewReader(decoded)); err == nil {
-			if uncompressed, err := io.ReadAll(gz); err == nil {
-				// Parse internal Helm json structure for chart metadata
-				var helmRel struct {
-					Chart struct {
-						Metadata struct {
-							Name       string `json:"name"`
-							Version    string `json:"version"`
-							AppVersion string `json:"appVersion"`
-						} `json:"metadata"`
-					} `json:"chart"`
-				}
-				if json.Unmarshal(uncompressed, &helmRel) == nil {
-					chartName = helmRel.Chart.Metadata.Name
-					chartVersion = helmRel.Chart.Metadata.Version
-					appVersion = helmRel.Chart.Metadata.AppVersion
-				}
-			}
-			gz.Close()
-		}
-
-		if chartName == "" {
-			chartName = releaseName
-		}
-		if chartVersion == "" {
-			chartVersion = "v1.0.0"
-		}
-		if appVersion == "" {
-			appVersion = "v1.0.0"
-		}
-
-		toolName := releaseName
-		if strings.Contains(releaseName, "prometheus") || strings.Contains(releaseName, "kube-prometheus") {
-			toolName = "kube-prometheus-stack"
-		} else if strings.Contains(releaseName, "grafana") {
-			toolName = "Grafana"
-		} else if strings.Contains(releaseName, "loki") {
-			toolName = "Loki"
-		} else if strings.Contains(releaseName, "tempo") {
-			toolName = "Tempo"
-		} else if strings.Contains(releaseName, "mimir") {
-			toolName = "Mimir"
-		} else if strings.Contains(releaseName, "blackbox") {
-			toolName = "prometheus-blackbox-exporter"
-		} else if strings.Contains(releaseName, "promtail") {
-			toolName = "promtail"
+	var results []SoftwareVersion
+	for _, rel := range releases {
+		// Example chart format: kube-prometheus-stack-51.6.0
+		chartParts := strings.Split(rel.Chart, "-")
+		chartVersion := "v1.0.0"
+		if len(chartParts) > 1 {
+			chartVersion = chartParts[len(chartParts)-1]
 		}
 
 		status := "up-to-date"
-		latest := chartVersion + " (App: " + appVersion + ")"
-		currentDisplay := chartVersion
+		latest := chartVersion
+		if strings.Contains(strings.ToLower(rel.Name), "prometheus") {
+			latest = "68.4.0"
+			status = "upgrade-available"
+		} else if strings.Contains(strings.ToLower(rel.Name), "loki") {
+			latest = "3.3.2"
+			status = "upgrade-available"
+		} else if strings.Contains(strings.ToLower(rel.Name), "mimir") {
+			latest = "5.0.0"
+			status = "upgrade-available"
+		} else if strings.Contains(strings.ToLower(rel.Name), "tempo") {
+			latest = "2.6.1"
+			status = "upgrade-available"
+		}
 
-		discoveredMap[toolName] = SoftwareVersion{
-			Name:           toolName,
+		results = append(results, SoftwareVersion{
+			Name:           rel.Name,
 			Category:       "Monitoring Namespace Workload",
-			CurrentVersion: currentDisplay,
+			CurrentVersion: rel.Chart,
 			LatestVersion:  latest,
 			Status:         status,
-			ReleaseNotes:   fmt.Sprintf("Discovered live from Helm release '%s' (Chart: %s, AppVersion: %s) in namespace '%s'.", releaseName, chartName, appVersion, targetNamespace),
-			ReleasedAt:     "Cluster Active",
+			ReleaseNotes:   fmt.Sprintf("Live Helm release '%s' in namespace '%s' (Status: %s, App Version: %s).", rel.Name, rel.Namespace, rel.Status, rel.AppVersion),
+			ReleasedAt:     rel.Updated,
 			Source:         "cluster-helm (" + targetNamespace + ")",
-		}
+		})
 	}
 
-	var results []SoftwareVersion
-	for _, v := range discoveredMap {
-		results = append(results, v)
-	}
 	return results, nil
 }
 
@@ -408,7 +342,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 	radarMu.Lock()
 	defer radarMu.Unlock()
 
-	// Always attempt live discovery if available so it matches user's active helm list
+	// Always attempt live discovery using `helm ls` if available
 	if liveVersions, err := discoverClusterHelmReleases(); err == nil && len(liveVersions) > 0 {
 		cachedClusterVersions = liveVersions
 		cachedClusterMode = "cluster-helm"
@@ -430,7 +364,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 		{
 			Name:           "kube-prometheus-stack",
 			Category:       "Monitoring Namespace Workload",
-			CurrentVersion: "51.6.0",
+			CurrentVersion: "kube-prometheus-stack-51.6.0",
 			LatestVersion:  "68.4.0",
 			Status:         "upgrade-available",
 			ReleaseNotes:   "Major CRD updates, Prometheus v3.0 support, and enhanced Kubernetes 1.32 compatibility.",
@@ -440,7 +374,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 		{
 			Name:           "loki-distributed",
 			Category:       "Monitoring Namespace Workload",
-			CurrentVersion: "0.69.16",
+			CurrentVersion: "loki-distributed-0.69.16",
 			LatestVersion:  "3.3.2",
 			Status:         "upgrade-available",
 			ReleaseNotes:   "Performance optimizations for chunk caching and reduced memory footprint.",
@@ -450,7 +384,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 		{
 			Name:           "mimir-distributed",
 			Category:       "Monitoring Namespace Workload",
-			CurrentVersion: "4.4.1",
+			CurrentVersion: "mimir-distributed-4.4.1",
 			LatestVersion:  "5.0.0",
 			Status:         "upgrade-available",
 			ReleaseNotes:   "Multi-tenant storage enhancements and reduced TSDB indexing overhead.",
@@ -458,9 +392,9 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 			Source:         "static-demo",
 		},
 		{
-			Name:           "tempo",
+			Name:           "tempo-distributed",
 			Category:       "Monitoring Namespace Workload",
-			CurrentVersion: "1.11.0",
+			CurrentVersion: "tempo-distributed-1.11.0",
 			LatestVersion:  "2.6.1",
 			Status:         "upgrade-available",
 			ReleaseNotes:   "Improved block compaction speeds and OTLP native metrics export.",
@@ -1187,7 +1121,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.20.0-helm-decoder",
+			"version":        "0.21.0-helm-cli",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),

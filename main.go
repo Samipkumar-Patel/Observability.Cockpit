@@ -265,7 +265,7 @@ func getLogs() ([]LogEntry, error) {
 	return logs, nil
 }
 
-// Target specifically the "monitoring" namespace in Kubernetes / AKS
+// Target specifically the "monitoring" namespace with unified category
 func discoverClusterVersions() ([]SoftwareVersion, error) {
 	var k8sConfig *rest.Config
 	var err error
@@ -343,48 +343,18 @@ func discoverClusterVersions() ([]SoftwareVersion, error) {
 				imageTag = imageParts[1]
 			}
 
-			lowerImg := strings.ToLower(container.image)
-			var toolName, category string
-
-			if strings.Contains(lowerImg, "grafana") {
-				toolName = "Grafana"
-				category = "Dashboard & Visualization"
-			} else if strings.Contains(lowerImg, "loki") {
-				toolName = "Loki"
-				category = "Log Aggregation"
-			} else if strings.Contains(lowerImg, "tempo") {
-				toolName = "Tempo"
-				category = "Distributed Tracing"
-			} else if strings.Contains(lowerImg, "mimir") {
-				toolName = "Mimir"
-				category = "Metrics Long-term Storage"
-			} else if strings.Contains(lowerImg, "n8n") {
-				toolName = "n8n"
-				category = "Workflow Automation"
-			} else if strings.Contains(lowerImg, "prometheus") || strings.Contains(lowerImg, "thanos") || strings.Contains(lowerImg, "alertmanager") {
-				toolName = "kube-prometheus-stack"
-				category = "Monitoring"
-			} else if strings.Contains(lowerImg, "otel") || strings.Contains(lowerImg, "opentelemetry") {
-				toolName = "OpenTelemetry Collector"
-				category = "Telemetry Pipeline"
-			} else {
-				parts := strings.Split(imageName, "/")
-				toolName = parts[len(parts)-1]
-				category = "Monitoring Namespace Workload"
-			}
+			parts := strings.Split(imageName, "/")
+			toolName := parts[len(parts)-1]
 
 			status := "up-to-date"
 			latest := imageTag
-			if strings.Contains(strings.ToLower(toolName), "grafana") && (imageTag == "10.4.0" || imageTag == "10.3.0") {
-				status = "security-update"
-				latest = "11.4.0"
-			} else if imageTag != "latest" && imageTag != "stable" && !strings.HasPrefix(imageTag, "v1.75") && !strings.HasPrefix(imageTag, "v68") {
+			if imageTag != "latest" && imageTag != "stable" {
 				status = "upgrade-available"
 			}
 
 			discoveredMap[toolName] = SoftwareVersion{
 				Name:           toolName,
-				Category:       category,
+				Category:       "Monitoring Namespace Workload",
 				CurrentVersion: imageTag,
 				LatestVersion:  latest,
 				Status:         status,
@@ -417,7 +387,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 	return []SoftwareVersion{
 		{
 			Name:           "kube-prometheus-stack",
-			Category:       "Monitoring",
+			Category:       "Monitoring Namespace Workload",
 			CurrentVersion: "v56.2.1",
 			LatestVersion:  "v68.4.0",
 			Status:         "upgrade-available",
@@ -427,7 +397,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 		},
 		{
 			Name:           "Grafana",
-			Category:       "Dashboard & Visualization",
+			Category:       "Monitoring Namespace Workload",
 			CurrentVersion: "10.4.0",
 			LatestVersion:  "11.4.0",
 			Status:         "security-update",
@@ -437,7 +407,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 		},
 		{
 			Name:           "Loki",
-			Category:       "Log Aggregation",
+			Category:       "Monitoring Namespace Workload",
 			CurrentVersion: "2.9.3",
 			LatestVersion:  "3.3.2",
 			Status:         "upgrade-available",
@@ -447,7 +417,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 		},
 		{
 			Name:           "Tempo",
-			Category:       "Distributed Tracing",
+			Category:       "Monitoring Namespace Workload",
 			CurrentVersion: "2.4.1",
 			LatestVersion:  "2.6.1",
 			Status:         "upgrade-available",
@@ -457,7 +427,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 		},
 		{
 			Name:           "n8n",
-			Category:       "Workflow Automation",
+			Category:       "Monitoring Namespace Workload",
 			CurrentVersion: "1.38.2",
 			LatestVersion:  "1.75.1",
 			Status:         "upgrade-available",
@@ -467,7 +437,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 		},
 		{
 			Name:           "Mimir",
-			Category:       "Metrics Long-term Storage",
+			Category:       "Monitoring Namespace Workload",
 			CurrentVersion: "2.11.0",
 			LatestVersion:  "2.14.0",
 			Status:         "up-to-date",
@@ -1200,7 +1170,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.16.1-monitoring-namespace",
+			"version":        "0.16.2-unified-category",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),

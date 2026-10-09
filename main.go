@@ -65,6 +65,13 @@ type LogEntry struct {
 	Timestamp   time.Time `json:"timestamp"`
 }
 
+type AIInsight struct {
+	Severity    string `json:"severity"` // "info", "warning", "critical"
+	Title       string `json:"title"`
+	ServiceName string `json:"service_name"`
+	Description string `json:"description"`
+}
+
 var db *sql.DB
 
 func initDB() error {
@@ -227,6 +234,78 @@ func getLogs() ([]LogEntry, error) {
 	return logs, nil
 }
 
+// AI Engine: Analyzes telemetry in SQLite and generates intelligent root-cause insights & anomaly reports
+func generateAIInsights() []AIInsight {
+	var insights []AIInsight
+
+	spans, _ := getSpans()
+	logs, _ := getLogs()
+
+	serviceStats := make(map[string]struct {
+		total  int
+		errors int
+		maxDur int64
+	})
+
+	for _, s := range spans {
+		stats := serviceStats[s.ServiceName]
+		stats.total++
+		if s.StatusCode >= 400 {
+			stats.errors++
+		}
+		if s.DurationMs > stats.maxDur {
+			stats.maxDur = s.DurationMs
+		}
+		serviceStats[s.ServiceName] = stats
+	}
+
+	for svc, stats := range serviceStats {
+		if stats.total > 0 && float64(stats.errors)/float64(stats.total) >= 0.2 {
+			insights = append(insights, AIInsight{
+				Severity:    "critical",
+				ServiceName: svc,
+				Title:       fmt.Sprintf("High Error Rate in %s", svc),
+				Description: fmt.Sprintf("AI detected an elevated error rate of %.1f%% (%d/%d requests failed). Immediate investigation recommended.", (float64(stats.errors)/float64(stats.total))*100, stats.errors, stats.total),
+			})
+		}
+		if stats.maxDur > 200 {
+			insights = append(insights, AIInsight{
+				Severity:    "warning",
+				ServiceName: svc,
+				Title:       fmt.Sprintf("Performance Latency Spike (%dms)", stats.maxDur),
+				Description: fmt.Sprintf("Service %s recorded a slow execution span. Check database or network bottlenecks.", svc),
+			})
+		}
+	}
+
+	errorLogsCount := 0
+	for _, l := range logs {
+		if l.Level == "ERROR" {
+			errorLogsCount++
+		}
+	}
+
+	if errorLogsCount > 0 {
+		insights = append(insights, AIInsight{
+			Severity:    "warning",
+			ServiceName: "System-Wide",
+			Title:       fmt.Sprintf("%d Critical Log Error(s) Captured", errorLogsCount),
+			Description: "AI log analyzer identified recurring error logs indicating potential exceptions or timeouts across connected microservices.",
+		})
+	}
+
+	if len(insights) == 0 {
+		insights = append(insights, AIInsight{
+			Severity:    "info",
+			ServiceName: "Cluster",
+			Title:       "All Systems Operating Normally",
+			Description: "AI telemetry analysis shows stable latencies, nominal error rates, and normal telemetry flow across all active services.",
+		})
+	}
+
+	return insights
+}
+
 func seedDemoData() {
 	var count int
 	db.QueryRow(`SELECT COUNT(*) FROM spans`).Scan(&count)
@@ -291,10 +370,12 @@ func getDashboardHTML() string {
     :root {
       --ink: #17252b; --muted: #718087; --line: #dce5e3; --paper: #f5f7f4; --panel: #fff;
       --teal: #147d76; --orange: #d66c3c; --hover: #f1f5f3; --btn-bg: #e8efeb;
+      --ai-bg: #e2f0ea; --ai-border: #b8d9cc; --ai-text: #0f514c;
     }
     [data-theme="dark"] {
       --ink: #f0f4f8; --muted: #9aa5b1; --line: #2d3748; --paper: #111822; --panel: #1a2332;
       --teal: #319795; --orange: #ed8936; --hover: #222d3f; --btn-bg: #222d3f;
+      --ai-bg: #162c28; --ai-border: #234e48; --ai-text: #4fd1c5;
     }
     * { box-sizing: border-box; }
     body { margin: 0; color: var(--ink); background: var(--paper); font: 15px/1.5 system-ui, sans-serif; transition: background 0.2s, color 0.2s; }
@@ -307,6 +388,17 @@ func getDashboardHTML() string {
     .btn { background: var(--btn-bg); border: 1px solid var(--line); color: var(--ink); border-radius: 99px; padding: 6px 14px; font-size: 11px; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
     .btn-primary { background: var(--teal); color: #fff; border-color: var(--teal); }
     
+    /* AI Insights Panel */
+    .ai-panel { background: var(--ai-bg); border: 1px solid var(--ai-border); border-radius: 6px; padding: 20px; margin-bottom: 24px; }
+    .ai-header { display: flex; align-items: center; gap: 8px; font-weight: 800; color: var(--ai-text); font-size: 14px; margin-bottom: 12px; letter-spacing: .06em; text-transform: uppercase; }
+    .ai-insights-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+    .ai-card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; }
+    .ai-card.critical { border-left: 4px solid var(--orange); }
+    .ai-card.warning { border-left: 4px solid #d69e2e; }
+    .ai-card.info { border-left: 4px solid var(--teal); }
+    .ai-card-title { font-weight: 700; font-size: 14px; margin-bottom: 4px; display: flex; justify-content: space-between; }
+    .ai-card-desc { color: var(--muted); font-size: 13px; }
+
     /* KPI Summary Cards */
     .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
     .kpi-card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 18px; }
@@ -362,9 +454,20 @@ func getDashboardHTML() string {
       </div>
       <div class="badge-group">
         <button class="btn" onclick="toggleTheme()">🌓 Theme</button>
-        <span class="badge">LIVE ENGINE</span>
+        <span class="badge">AI-POWERED</span>
       </div>
     </header>
+
+    <!-- AI Observability Assistant Panel -->
+    <section class="ai-panel">
+      <div class="ai-header">🤖 AI Observability Assistant & Root-Cause Analyzer</div>
+      <div class="ai-insights-grid" id="ai-insights-container">
+        <div class="ai-card info">
+          <div class="ai-card-title">Analyzing Telemetry...</div>
+          <div class="ai-card-desc">AI engine is evaluating traces, logs, and error rates.</div>
+        </div>
+      </div>
+    </section>
 
     <!-- KPI Summary Cards -->
     <section class="kpi-grid">
@@ -474,7 +577,7 @@ func getDashboardHTML() string {
   </div>
 
   <script>
-    let globalData = { traces: [], metrics: [], logs: [] };
+    let globalData = { traces: [], metrics: [], logs: [], insights: [] };
     let refreshTimer = null;
 
     function toggleTheme() {
@@ -490,16 +593,19 @@ func getDashboardHTML() string {
 
     async function fetchData() {
       try {
-        const [tracesRes, metricsRes, logsRes] = await Promise.all([
+        const [tracesRes, metricsRes, logsRes, insightsRes] = await Promise.all([
           fetch("/api/traces"),
           fetch("/api/metrics"),
-          fetch("/api/logs")
+          fetch("/api/logs"),
+          fetch("/api/insights")
         ]);
         globalData.traces = await tracesRes.json() || [];
         globalData.metrics = await metricsRes.json() || [];
         globalData.logs = await logsRes.json() || [];
+        globalData.insights = await insightsRes.json() || [];
         
         updateKPIs();
+        renderAIInsights();
         renderChart();
         filterData();
       } catch (err) {
@@ -524,6 +630,20 @@ func getDashboardHTML() string {
       document.querySelector("#kpi-logs").textContent = globalData.logs.length;
     }
 
+    function renderAIInsights() {
+      const container = document.querySelector("#ai-insights-container");
+      if (!globalData.insights || globalData.insights.length === 0) {
+        container.innerHTML = '<div class="ai-card info"><div class="ai-card-title">All Systems Normal</div><div class="ai-card-desc">No anomalies detected by AI.</div></div>';
+        return;
+      }
+      container.innerHTML = globalData.insights.map(function(i) {
+        return '<div class="ai-card ' + i.severity + '">' +
+          '<div class="ai-card-title"><span>' + i.title + '</span> <span class="tag">' + i.service_name + '</span></div>' +
+          '<div class="ai-card-desc">' + i.description + '</div>' +
+        '</div>';
+      }).join("");
+    }
+
     function renderChart() {
       const chartContainer = document.querySelector("#latency-chart");
       const recentTraces = [...globalData.traces].reverse().slice(-15);
@@ -531,8 +651,8 @@ func getDashboardHTML() string {
         chartContainer.innerHTML = '<span class="muted" style="margin: auto; font-size: 13px;">No trace latency data available</span>';
         return;
       }
-      const maxDuration = Math.max(...recentTraces.map(t => t.duration_ms), 50);
-      chartContainer.innerHTML = recentTraces.map(t => {
+      const maxDuration = Math.max(...recentTraces.map(function(t) { return t.duration_ms; }), 50);
+      chartContainer.innerHTML = recentTraces.map(function(t) {
         const heightPct = Math.max(Math.round((t.duration_ms / maxDuration) * 100), 8);
         const isError = t.status_code >= 400;
         return '<div class="chart-bar-wrap" title="' + t.service_name + ' | ' + t.operation_name + ' | ' + t.duration_ms + 'ms">' +
@@ -545,21 +665,21 @@ func getDashboardHTML() string {
     function filterData() {
       const q = (document.querySelector("#search-box").value || "").toLowerCase().trim();
       
-      const filteredTraces = globalData.traces.filter(s => {
+      const filteredTraces = globalData.traces.filter(function(s) {
         if (!q) return true;
         return (s.service_name || "").toLowerCase().includes(q) || 
                (s.operation_name || "").toLowerCase().includes(q) ||
                String(s.status_code).includes(q);
       });
 
-      const filteredMetrics = globalData.metrics.filter(m => {
+      const filteredMetrics = globalData.metrics.filter(function(m) {
         if (!q) return true;
         return (m.service_name || "").toLowerCase().includes(q) || 
                (m.metric_name || "").toLowerCase().includes(q) ||
                String(m.value).includes(q);
       });
 
-      const filteredLogs = globalData.logs.filter(l => {
+      const filteredLogs = globalData.logs.filter(function(l) {
         if (!q) return true;
         return (l.service_name || "").toLowerCase().includes(q) || 
                (l.message || "").toLowerCase().includes(q) || 
@@ -716,11 +836,17 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.8.0-pro-gui",
+			"version":        "0.9.1-ai-assistant-fixed",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),
 		})
+	})
+
+	mux.HandleFunc("/api/insights", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		insights := generateAIInsights()
+		json.NewEncoder(w).Encode(insights)
 	})
 
 	mux.HandleFunc("/api/traces", func(w http.ResponseWriter, r *http.Request) {

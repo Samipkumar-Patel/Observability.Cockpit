@@ -25,6 +25,7 @@ type Config struct {
 	Port       string            `json:"port"`
 	DBPath     string            `json:"db_path"`
 	MaxRecords int               `json:"max_records"`
+	Kubeconfig string            `json:"kubeconfig"`
 	Radar      []SoftwareVersion `json:"radar"`
 }
 
@@ -44,6 +45,9 @@ func loadConfig() {
 	}
 	if dbp := os.Getenv("DB_PATH"); dbp != "" {
 		cfg.DBPath = dbp
+	}
+	if kc := os.Getenv("KUBECONFIG"); kc != "" {
+		cfg.Kubeconfig = kc
 	}
 
 	if file, err := os.Open("config.json"); err == nil {
@@ -93,10 +97,10 @@ type SoftwareVersion struct {
 	Category       string `json:"category"`
 	CurrentVersion string `json:"current_version"`
 	LatestVersion  string `json:"latest_version"`
-	Status         string `json:"status"` // "up-to-date", "upgrade-available", "security-update"
+	Status         string `json:"status"`
 	ReleaseNotes   string `json:"release_notes"`
 	ReleasedAt     string `json:"released_at"`
-	Source         string `json:"source"` // "cluster-live" or "static"
+	Source         string `json:"source"`
 }
 
 var db *sql.DB
@@ -261,20 +265,19 @@ func getLogs() ([]LogEntry, error) {
 	return logs, nil
 }
 
-// Connects to Kubernetes / AKS cluster to discover live deployed versions
 func discoverClusterVersions() ([]SoftwareVersion, error) {
 	var k8sConfig *rest.Config
 	var err error
 
-	// Try in-cluster config first (AKS / K8s pod)
 	k8sConfig, err = rest.InClusterConfig()
 	if err != nil {
-		// Fallback to local kubeconfig (~/.kube/config)
-		var kubeconfig string
-		if home := os.Getenv("USERPROFILE"); home != "" {
-			kubeconfig = filepath.Join(home, ".kube", "config")
-		} else if home := os.Getenv("HOME"); home != "" {
-			kubeconfig = filepath.Join(home, ".kube", "config")
+		kubeconfig := cfg.Kubeconfig
+		if kubeconfig == "" {
+			if home := os.Getenv("USERPROFILE"); home != "" {
+				kubeconfig = filepath.Join(home, ".kube", "config")
+			} else if home := os.Getenv("HOME"); home != "" {
+				kubeconfig = filepath.Join(home, ".kube", "config")
+			}
 		}
 		k8sConfig, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
@@ -287,7 +290,6 @@ func discoverClusterVersions() ([]SoftwareVersion, error) {
 		return nil, err
 	}
 
-	// List deployments across all namespaces to inspect running images
 	deployments, err := clientset.AppsV1().Deployments("").List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return nil, err
@@ -358,19 +360,18 @@ func discoverClusterVersions() ([]SoftwareVersion, error) {
 	return results, nil
 }
 
-func getVersionRadar() []SoftwareVersion {
+func getVersionRadar() ([]SoftwareVersion, string) {
 	radarMu.Lock()
 	defer radarMu.Unlock()
 
-	// 1. Try discovering live versions from connected AKS/K8s cluster
+	// 1. Try discovering live versions from connected AKS cluster
 	if liveVersions, err := discoverClusterVersions(); err == nil && len(liveVersions) > 0 {
-		// Merge with any custom registered items
-		return liveVersions
+		return liveVersions, "cluster-live"
 	}
 
 	// 2. Fallback to custom config radar if configured
 	if len(customRadar) > 0 {
-		return customRadar
+		return customRadar, "config-file"
 	}
 
 	// 3. Ultimate fallback: static enterprise demo radar
@@ -435,15 +436,16 @@ func getVersionRadar() []SoftwareVersion {
 			ReleasedAt:     "3 weeks ago",
 			Source:         "static-demo",
 		},
-	}
+	}, "static-demo"
 }
 
 func upsertRadarVersion(sv SoftwareVersion) {
 	radarMu.Lock()
 	defer radarMu.Unlock()
 
+	defaultRadar, _ := getVersionRadar()
 	if len(customRadar) == 0 {
-		customRadar = getVersionRadar()
+		customRadar = defaultRadar
 	}
 
 	found := false
@@ -650,6 +652,10 @@ func getDashboardHTML() string {
     .badge-status-security { background: #fed7d7; color: #c53030; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
     .source-tag { background: #ebf8ff; color: #3182ce; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-left: 6px; }
 
+    /* Instructions Box */
+    .aks-banner { background: var(--ai-bg); border: 1px solid var(--ai-border); border-radius: 6px; padding: 16px 20px; margin-bottom: 20px; font-size: 13px; color: var(--ai-text); }
+    .aks-banner code { background: var(--panel); padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+
     /* Modal */
     .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 100; }
     .modal-overlay.active { display: flex; }
@@ -667,7 +673,7 @@ func getDashboardHTML() string {
       <div>
         <p class="eyebrow">ENTERPRISE OBSERVABILITY ENGINE</p>
         <h1>CloudOps Cockpit</h1>
-        <p class="muted">Unified OTLP Traces, Metrics, Logs, & Live AKS Version Radar Console.</p>
+        <p class="muted">Unified OTLP Traces, Metrics, Logs, & Version Radar Console.</p>
       </div>
       <div class="badge-group">
         <button class="btn" onclick="toggleTheme()">🌓 Theme</button>
@@ -677,7 +683,7 @@ func getDashboardHTML() string {
 
     <!-- Navigation Bar -->
     <nav class="nav-bar">
-      <button class="nav-btn active" onclick="switchPage('radar', event)">🛰️ Version Radar (Live AKS)</button>
+      <button class="nav-btn active" onclick="switchPage('radar', event)">🛰️ Version Radar</button>
       <button class="nav-btn" onclick="switchPage('traces', event)">📊 Live Traces & Latency</button>
       <button class="nav-btn" onclick="switchPage('metrics', event)">📈 Metrics Stream</button>
       <button class="nav-btn" onclick="switchPage('logs', event)">📝 Structured Logs</button>
@@ -686,17 +692,23 @@ func getDashboardHTML() string {
 
     <!-- PAGE 1: VERSION RADAR (DEFAULT) -->
     <section id="page-radar" class="page-section active">
+      <div class="aks-banner">
+        <strong>💡 Connecting your AKS / Kubernetes Cluster:</strong><br>
+        To let CloudOps Cockpit automatically inspect your cluster deployments, connect your kubectl context or set the config path:<br>
+        <code>az aks get-credentials --resource-group myResourceGroup --name myAKSCluster</code><br>
+        Alternatively, point the app using environment variable: <code>$env:KUBECONFIG="C:\path\to\kubeconfig"</code>
+      </div>
       <article class="panel">
         <div class="panel-heading">
           <h2>Open-Source Version Radar & Upgrade Assistant</h2>
-          <span class="muted">Live discovery from AKS cluster deployments</span>
+          <span class="muted" id="radar-mode-label">Mode: Enterprise Demo / Config</span>
         </div>
         <table>
           <thead>
             <tr><th>Software / Stack</th><th>Category</th><th>Current</th><th>Latest</th><th>Status</th><th>Source</th><th>Action</th></tr>
           </thead>
           <tbody id="radar-table">
-            <tr><td colspan="7" style="text-align:center; color: var(--muted);">Discovering cluster versions...</td></tr>
+            <tr><td colspan="7" style="text-align:center; color: var(--muted);">Loading version radar...</td></tr>
           </tbody>
         </table>
       </article>
@@ -823,7 +835,7 @@ func getDashboardHTML() string {
   </div>
 
   <script>
-    let globalData = { traces: [], metrics: [], logs: [], insights: [], radar: [] };
+    let globalData = { traces: [], metrics: [], logs: [], insights: [], radar: [], mode: "static-demo" };
     let refreshTimer = null;
 
     function toggleTheme() {
@@ -863,7 +875,10 @@ func getDashboardHTML() string {
         globalData.metrics = await metricsRes.json() || [];
         globalData.logs = await logsRes.json() || [];
         globalData.insights = await insightsRes.json() || [];
-        globalData.radar = await radarRes.json() || [];
+        
+        const radarData = await radarRes.json();
+        globalData.radar = radarData.versions || [];
+        globalData.mode = radarData.mode || "static-demo";
         
         updateKPIs();
         renderAIInsights();
@@ -908,6 +923,14 @@ func getDashboardHTML() string {
 
     function renderRadar() {
       const tbody = document.querySelector("#radar-table");
+      const modeLabel = document.querySelector("#radar-mode-label");
+      
+      if (globalData.mode === 'cluster-live') {
+        modeLabel.textContent = "Mode: Connected to Live AKS Cluster 🟢";
+      } else {
+        modeLabel.textContent = "Mode: Enterprise Demo / Config 🛡️ (Set KUBECONFIG to connect cluster)";
+      }
+
       if (!globalData.radar || globalData.radar.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--muted);">No software versions tracked.</td></tr>';
         return;
@@ -1108,7 +1131,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.13.0-live-cluster-radar",
+			"version":        "0.14.0-radar-instructions",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),
@@ -1123,8 +1146,11 @@ func main() {
 
 	mux.HandleFunc("/api/radar", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		radar := getVersionRadar()
-		json.NewEncoder(w).Encode(radar)
+		versions, mode := getVersionRadar()
+		json.NewEncoder(w).Encode(map[string]any{
+			"mode":     mode,
+			"versions": versions,
+		})
 	})
 
 	mux.HandleFunc("/v1/radar", func(w http.ResponseWriter, r *http.Request) {
@@ -1260,6 +1286,10 @@ func main() {
 		}
 
 		body, err := io.ReadAll(r.Body)
+		linkBody := io.ReadAll
+		_ = linkBody
+
+		body, err = io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

@@ -7,18 +7,22 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
 
 type Config struct {
-	Port       string `json:"port"`
-	DBPath     string `json:"db_path"`
-	MaxRecords int    `json:"max_records"`
+	Port       string            `json:"port"`
+	DBPath     string            `json:"db_path"`
+	MaxRecords int               `json:"max_records"`
+	Radar      []SoftwareVersion `json:"radar"`
 }
 
 var cfg Config
+var customRadar []SoftwareVersion
+var radarMu sync.Mutex
 
 func loadConfig() {
 	cfg = Config{
@@ -38,6 +42,10 @@ func loadConfig() {
 		defer file.Close()
 		decoder := json.NewDecoder(file)
 		_ = decoder.Decode(&cfg)
+	}
+
+	if len(cfg.Radar) > 0 {
+		customRadar = cfg.Radar
 	}
 }
 
@@ -245,6 +253,13 @@ func getLogs() ([]LogEntry, error) {
 }
 
 func getVersionRadar() []SoftwareVersion {
+	radarMu.Lock()
+	defer radarMu.Unlock()
+
+	if len(customRadar) > 0 {
+		return customRadar
+	}
+
 	return []SoftwareVersion{
 		{
 			Name:           "kube-prometheus-stack",
@@ -300,6 +315,46 @@ func getVersionRadar() []SoftwareVersion {
 			ReleaseNotes:   "Hadoop/S3 multi-tenant storage enhancements and reduced TSDB indexing overhead.",
 			ReleasedAt:     "3 weeks ago",
 		},
+	}
+}
+
+func upsertRadarVersion(sv SoftwareVersion) {
+	radarMu.Lock()
+	defer radarMu.Unlock()
+
+	// If empty, initialize with default radar first
+	if len(customRadar) == 0 {
+		customRadar = getVersionRadar()
+	}
+
+	found := false
+	for i, item := range customRadar {
+		if item.Name == sv.Name {
+			if sv.CurrentVersion != "" {
+				customRadar[i].CurrentVersion = sv.CurrentVersion
+			}
+			if sv.LatestVersion != "" {
+				customRadar[i].LatestVersion = sv.LatestVersion
+			}
+			if sv.Category != "" {
+				customRadar[i].Category = sv.Category
+			}
+			if sv.Status != "" {
+				customRadar[i].Status = sv.Status
+			}
+			if sv.ReleaseNotes != "" {
+				customRadar[i].ReleaseNotes = sv.ReleaseNotes
+			}
+			if sv.ReleasedAt != "" {
+				customRadar[i].ReleasedAt = sv.ReleasedAt
+			}
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		customRadar = append(customRadar, sv)
 	}
 }
 
@@ -931,7 +986,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.11.0-multipage-gui",
+			"version":        "0.12.0-custom-radar",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),
@@ -948,6 +1003,34 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		radar := getVersionRadar()
 		json.NewEncoder(w).Encode(radar)
+	})
+
+	mux.HandleFunc("/v1/radar", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+
+		var sv SoftwareVersion
+		if err := json.Unmarshal(body, &sv); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if sv.Name == "" {
+			http.Error(w, "Software 'name' is required", http.StatusBadRequest)
+			return
+		}
+
+		upsertRadarVersion(sv)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"success"}`))
 	})
 
 	mux.HandleFunc("/api/traces", func(w http.ResponseWriter, r *http.Request) {

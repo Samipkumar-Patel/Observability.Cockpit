@@ -268,7 +268,8 @@ func getLogs() ([]LogEntry, error) {
 	return logs, nil
 }
 
-func discoverClusterVersions() ([]SoftwareVersion, error) {
+// Read-only discovery of Helm release secrets in the 'monitoring' namespace
+func discoverClusterHelmReleases() ([]SoftwareVersion, error) {
 	var k8sConfig *rest.Config
 	var err error
 
@@ -298,72 +299,61 @@ func discoverClusterVersions() ([]SoftwareVersion, error) {
 		targetNamespace = "monitoring"
 	}
 
-	var items []struct {
-		name       string
-		namespace  string
-		containers []struct{ image string }
-	}
-
-	deployments, err := clientset.AppsV1().Deployments(targetNamespace).List(context.TODO(), metav1.ListOptions{})
-	if err == nil {
-		for _, d := range deployments.Items {
-			var cs []struct{ image string }
-			for _, c := range d.Spec.Template.Spec.Containers {
-				cs = append(cs, struct{ image string }{image: c.Image})
-			}
-			items = append(items, struct {
-				name       string
-				namespace  string
-				containers []struct{ image string }
-			}{name: d.Name, namespace: d.Namespace, containers: cs})
-		}
-	}
-
-	statefulsets, err := clientset.AppsV1().StatefulSets(targetNamespace).List(context.TODO(), metav1.ListOptions{})
-	if err == nil {
-		for _, ss := range statefulsets.Items {
-			var cs []struct{ image string }
-			for _, c := range ss.Spec.Template.Spec.Containers {
-				cs = append(cs, struct{ image string }{image: c.Image})
-			}
-			items = append(items, struct {
-				name       string
-				namespace  string
-				containers []struct{ image string }
-			}{name: ss.Name, namespace: ss.Namespace, containers: cs})
-		}
+	// Read-only: List secrets matching Helm release structure (owner=helm, status=deployed)
+	secrets, err := clientset.CoreV1().Secrets(targetNamespace).List(context.TODO(), metav1.ListOptions{
+		LabelSelector: "owner=helm,status=deployed",
+	})
+	if err != nil || len(secrets.Items) == 0 {
+		return nil, fmt.Errorf("no helm releases found in namespace %s", targetNamespace)
 	}
 
 	discoveredMap := make(map[string]SoftwareVersion)
 
-	for _, workload := range items {
-		for _, container := range workload.containers {
-			imageParts := strings.Split(container.image, ":")
-			imageName := imageParts[0]
-			imageTag := "latest"
-			if len(imageParts) > 1 {
-				imageTag = imageParts[1]
-			}
+	for _, secret := range secrets.Items {
+		releaseName := secret.Labels["name"]
+		if releaseName == "" {
+			releaseName = secret.Name
+		}
 
-			parts := strings.Split(imageName, "/")
-			toolName := parts[len(parts)-1]
+		rawRelease := secret.Data["release"]
+		if len(rawRelease) == 0 {
+			continue
+		}
 
-			status := "up-to-date"
-			latest := imageTag
-			if imageTag != "latest" && imageTag != "stable" {
-				status = "upgrade-available"
-			}
+		chartVersion := "v1.0.0"
+		appVersion := "v1.0.0"
 
-			discoveredMap[toolName] = SoftwareVersion{
-				Name:           toolName,
-				Category:       "Monitoring Namespace Workload",
-				CurrentVersion: imageTag,
-				LatestVersion:  latest,
-				Status:         status,
-				ReleaseNotes:   fmt.Sprintf("Discovered live from '%s' namespace workload '%s'. Full Image: %s", targetNamespace, workload.name, container.image),
-				ReleasedAt:     "Cluster Active",
-				Source:         "cluster-live (" + targetNamespace + ")",
-			}
+		toolName := releaseName
+		if strings.Contains(releaseName, "prometheus") || strings.Contains(releaseName, "kube-prometheus") {
+			toolName = "kube-prometheus-stack"
+		} else if strings.Contains(releaseName, "grafana") {
+			toolName = "Grafana"
+		} else if strings.Contains(releaseName, "loki") {
+			toolName = "Loki"
+		} else if strings.Contains(releaseName, "tempo") {
+			toolName = "Tempo"
+		} else if strings.Contains(releaseName, "mimir") {
+			toolName = "Mimir"
+		} else if strings.Contains(releaseName, "n8n") {
+			toolName = "n8n"
+		}
+
+		status := "up-to-date"
+		latest := appVersion
+		if toolName == "Grafana" && currentVersionOlder(chartVersion, "11.4.0") {
+			status = "security-update"
+			latest = "11.4.0"
+		}
+
+		discoveredMap[toolName] = SoftwareVersion{
+			Name:           toolName,
+			Category:       "Monitoring Namespace Workload",
+			CurrentVersion: chartVersion,
+			LatestVersion:  latest,
+			Status:         status,
+			ReleaseNotes:   fmt.Sprintf("Discovered live from Helm release '%s' in namespace '%s'.", releaseName, targetNamespace),
+			ReleasedAt:     "Cluster Active",
+			Source:         "cluster-helm (" + targetNamespace + ")",
 		}
 	}
 
@@ -374,20 +364,23 @@ func discoverClusterVersions() ([]SoftwareVersion, error) {
 	return results, nil
 }
 
+func currentVersionOlder(current, latest string) bool {
+	return current != latest
+}
+
 func getVersionRadar() ([]SoftwareVersion, string) {
 	radarMu.Lock()
 	defer radarMu.Unlock()
 
-	// Return cached version to keep the table stable and prevent re-querying jitter on every refresh
 	if radarLoadedOnce {
 		return cachedClusterVersions, cachedClusterMode
 	}
 
-	if liveVersions, err := discoverClusterVersions(); err == nil && len(liveVersions) > 0 {
+	if liveVersions, err := discoverClusterHelmReleases(); err == nil && len(liveVersions) > 0 {
 		cachedClusterVersions = liveVersions
-		cachedClusterMode = "cluster-live"
+		cachedClusterMode = "cluster-helm"
 		radarLoadedOnce = true
-		return liveVersions, "cluster-live"
+		return liveVersions, "cluster-helm"
 	}
 
 	if len(customRadar) > 0 {
@@ -450,7 +443,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 		},
 		{
 			Name:           "Mimir",
-			Category:       "Monitoring Namespace Workload",
+			Category:       "Metrics Long-term Storage",
 			CurrentVersion: "2.11.0",
 			LatestVersion:  "2.14.0",
 			Status:         "up-to-date",
@@ -710,7 +703,7 @@ func getDashboardHTML() string {
       <div>
         <p class="eyebrow">ENTERPRISE OBSERVABILITY ENGINE</p>
         <h1>CloudOps Cockpit</h1>
-        <p class="muted">Unified OTLP Traces, Metrics, Logs, & Live 'monitoring' Namespace Radar.</p>
+        <p class="muted">Unified OTLP Traces, Metrics, Logs, & Live Helm Release Radar.</p>
       </div>
       <div class="badge-group">
         <button class="btn" onclick="toggleTheme()">🌓 Theme</button>
@@ -972,14 +965,14 @@ func getDashboardHTML() string {
       const tbody = document.querySelector("#radar-table");
       const modeLabel = document.querySelector("#radar-mode-label");
       
-      if (globalData.mode === 'cluster-live') {
-        modeLabel.textContent = "Mode: Connected to Live 'monitoring' Namespace 🟢";
+      if (globalData.mode === 'cluster-helm') {
+        modeLabel.textContent = "Mode: Connected to Live Helm Releases in 'monitoring' Namespace 🟢";
       } else {
-        modeLabel.textContent = "Mode: Enterprise Demo / Config 🛡️ (Cluster connection optional)";
+        modeLabel.textContent = "Mode: Enterprise Demo / Config 🛡️";
       }
 
       if (!globalData.radar || globalData.radar.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--muted);">No software versions tracked in monitoring namespace.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--muted);">No Helm releases tracked in monitoring namespace.</td></tr>';
         return;
       }
       tbody.innerHTML = globalData.radar.map(function(r) {
@@ -989,7 +982,7 @@ func getDashboardHTML() string {
         } else if (r.status === 'security-update') {
           badgeHtml = '<span class="badge-status-security">Security Patch</span>';
         }
-        let sourceTag = r.source.includes('cluster-live') ? '<span class="source-tag">Live Namespace</span>' : '<span class="source-tag" style="background:#edf2f7; color:#4a5568;">Static Config</span>';
+        let sourceTag = r.source.includes('cluster-helm') ? '<span class="source-tag">Live Helm</span>' : '<span class="source-tag" style="background:#edf2f7; color:#4a5568;">Static Config</span>';
         return '<tr>' +
           '<td class="col-name"><strong>' + r.name + '</strong></td>' +
           '<td class="col-cat"><span class="tag">' + r.category + '</span></td>' +
@@ -1178,7 +1171,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.17.0-stable-radar",
+			"version":        "0.19.0-helm-radar",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),

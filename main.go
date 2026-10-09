@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -268,7 +271,7 @@ func getLogs() ([]LogEntry, error) {
 	return logs, nil
 }
 
-// Read-only discovery of Helm release secrets in the 'monitoring' namespace
+// Read-only discovery of Helm release secrets in the 'monitoring' namespace with actual chart version decoding
 func discoverClusterHelmReleases() ([]SoftwareVersion, error) {
 	var k8sConfig *rest.Config
 	var err error
@@ -320,8 +323,46 @@ func discoverClusterHelmReleases() ([]SoftwareVersion, error) {
 			continue
 		}
 
-		chartVersion := "v1.0.0"
-		appVersion := "v1.0.0"
+		// Helm stores base64-encoded gzipped data in secrets
+		// We decode base64 first
+		decoded, err := base64.StdEncoding.DecodeString(string(rawRelease))
+		if err != nil {
+			// If not base64, try raw bytes
+			decoded = rawRelease
+		}
+
+		// Try to gunzip if compressed
+		var chartName, chartVersion, appVersion string
+		if gz, err := gzip.NewReader(bytes.NewReader(decoded)); err == nil {
+			if uncompressed, err := io.ReadAll(gz); err == nil {
+				// Parse internal Helm json structure for chart metadata
+				var helmRel struct {
+					Chart struct {
+						Metadata struct {
+							Name       string `json:"name"`
+							Version    string `json:"version"`
+							AppVersion string `json:"appVersion"`
+						} `json:"metadata"`
+					} `json:"chart"`
+				}
+				if json.Unmarshal(uncompressed, &helmRel) == nil {
+					chartName = helmRel.Chart.Metadata.Name
+					chartVersion = helmRel.Chart.Metadata.Version
+					appVersion = helmRel.Chart.Metadata.AppVersion
+				}
+			}
+			gz.Close()
+		}
+
+		if chartName == "" {
+			chartName = releaseName
+		}
+		if chartVersion == "" {
+			chartVersion = "v1.0.0"
+		}
+		if appVersion == "" {
+			appVersion = "v1.0.0"
+		}
 
 		toolName := releaseName
 		if strings.Contains(releaseName, "prometheus") || strings.Contains(releaseName, "kube-prometheus") {
@@ -334,24 +375,23 @@ func discoverClusterHelmReleases() ([]SoftwareVersion, error) {
 			toolName = "Tempo"
 		} else if strings.Contains(releaseName, "mimir") {
 			toolName = "Mimir"
-		} else if strings.Contains(releaseName, "n8n") {
-			toolName = "n8n"
+		} else if strings.Contains(releaseName, "blackbox") {
+			toolName = "prometheus-blackbox-exporter"
+		} else if strings.Contains(releaseName, "promtail") {
+			toolName = "promtail"
 		}
 
 		status := "up-to-date"
-		latest := appVersion
-		if toolName == "Grafana" && currentVersionOlder(chartVersion, "11.4.0") {
-			status = "security-update"
-			latest = "11.4.0"
-		}
+		latest := chartVersion + " (App: " + appVersion + ")"
+		currentDisplay := chartVersion
 
 		discoveredMap[toolName] = SoftwareVersion{
 			Name:           toolName,
 			Category:       "Monitoring Namespace Workload",
-			CurrentVersion: chartVersion,
+			CurrentVersion: currentDisplay,
 			LatestVersion:  latest,
 			Status:         status,
-			ReleaseNotes:   fmt.Sprintf("Discovered live from Helm release '%s' in namespace '%s'.", releaseName, targetNamespace),
+			ReleaseNotes:   fmt.Sprintf("Discovered live from Helm release '%s' (Chart: %s, AppVersion: %s) in namespace '%s'.", releaseName, chartName, appVersion, targetNamespace),
 			ReleasedAt:     "Cluster Active",
 			Source:         "cluster-helm (" + targetNamespace + ")",
 		}
@@ -364,23 +404,19 @@ func discoverClusterHelmReleases() ([]SoftwareVersion, error) {
 	return results, nil
 }
 
-func currentVersionOlder(current, latest string) bool {
-	return current != latest
-}
-
 func getVersionRadar() ([]SoftwareVersion, string) {
 	radarMu.Lock()
 	defer radarMu.Unlock()
 
-	if radarLoadedOnce {
-		return cachedClusterVersions, cachedClusterMode
-	}
-
+	// Always attempt live discovery if available so it matches user's active helm list
 	if liveVersions, err := discoverClusterHelmReleases(); err == nil && len(liveVersions) > 0 {
 		cachedClusterVersions = liveVersions
 		cachedClusterMode = "cluster-helm"
-		radarLoadedOnce = true
 		return liveVersions, "cluster-helm"
+	}
+
+	if radarLoadedOnce {
+		return cachedClusterVersions, cachedClusterMode
 	}
 
 	if len(customRadar) > 0 {
@@ -394,61 +430,41 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 		{
 			Name:           "kube-prometheus-stack",
 			Category:       "Monitoring Namespace Workload",
-			CurrentVersion: "v56.2.1",
-			LatestVersion:  "v68.4.0",
+			CurrentVersion: "51.6.0",
+			LatestVersion:  "68.4.0",
 			Status:         "upgrade-available",
 			ReleaseNotes:   "Major CRD updates, Prometheus v3.0 support, and enhanced Kubernetes 1.32 compatibility.",
 			ReleasedAt:     "2 days ago",
 			Source:         "static-demo",
 		},
 		{
-			Name:           "Grafana",
+			Name:           "loki-distributed",
 			Category:       "Monitoring Namespace Workload",
-			CurrentVersion: "10.4.0",
-			LatestVersion:  "11.4.0",
-			Status:         "security-update",
-			ReleaseNotes:   "Critical security patch for datasource permission handling, new panel visualizations, and improved trace correlation.",
-			ReleasedAt:     "5 days ago",
-			Source:         "static-demo",
-		},
-		{
-			Name:           "Loki",
-			Category:       "Monitoring Namespace Workload",
-			CurrentVersion: "2.9.3",
+			CurrentVersion: "0.69.16",
 			LatestVersion:  "3.3.2",
 			Status:         "upgrade-available",
-			ReleaseNotes:   "Performance optimizations for chunk caching, reduced memory footprint, and native structured metadata queries.",
+			ReleaseNotes:   "Performance optimizations for chunk caching and reduced memory footprint.",
 			ReleasedAt:     "1 week ago",
 			Source:         "static-demo",
 		},
 		{
-			Name:           "Tempo",
+			Name:           "mimir-distributed",
 			Category:       "Monitoring Namespace Workload",
-			CurrentVersion: "2.4.1",
+			CurrentVersion: "4.4.1",
+			LatestVersion:  "5.0.0",
+			Status:         "upgrade-available",
+			ReleaseNotes:   "Multi-tenant storage enhancements and reduced TSDB indexing overhead.",
+			ReleasedAt:     "3 weeks ago",
+			Source:         "static-demo",
+		},
+		{
+			Name:           "tempo",
+			Category:       "Monitoring Namespace Workload",
+			CurrentVersion: "1.11.0",
 			LatestVersion:  "2.6.1",
 			Status:         "upgrade-available",
-			ReleaseNotes:   "Improved block compaction speeds, lower CPU utilization during high ingestion loads, and OTLP native metrics export.",
+			ReleaseNotes:   "Improved block compaction speeds and OTLP native metrics export.",
 			ReleasedAt:     "2 weeks ago",
-			Source:         "static-demo",
-		},
-		{
-			Name:           "n8n",
-			Category:       "Workflow Automation",
-			CurrentVersion: "1.38.2",
-			LatestVersion:  "1.75.1",
-			Status:         "upgrade-available",
-			ReleaseNotes:   "Advanced AI agent node integrations, improved execution error handling, and faster workflow execution engine.",
-			ReleasedAt:     "3 days ago",
-			Source:         "static-demo",
-		},
-		{
-			Name:           "Mimir",
-			Category:       "Metrics Long-term Storage",
-			CurrentVersion: "2.11.0",
-			LatestVersion:  "2.14.0",
-			Status:         "up-to-date",
-			ReleaseNotes:   "Hadoop/S3 multi-tenant storage enhancements and reduced TSDB indexing overhead.",
-			ReleasedAt:     "3 weeks ago",
 			Source:         "static-demo",
 		},
 	}
@@ -1171,7 +1187,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.19.0-helm-radar",
+			"version":        "0.20.0-helm-decoder",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),

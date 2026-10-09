@@ -31,6 +31,9 @@ type Config struct {
 
 var cfg Config
 var customRadar []SoftwareVersion
+var cachedClusterVersions []SoftwareVersion
+var cachedClusterMode = "static-demo"
+var radarLoadedOnce bool
 var radarMu sync.Mutex
 
 func loadConfig() {
@@ -265,7 +268,6 @@ func getLogs() ([]LogEntry, error) {
 	return logs, nil
 }
 
-// Target specifically the "monitoring" namespace with unified category
 func discoverClusterVersions() ([]SoftwareVersion, error) {
 	var k8sConfig *rest.Config
 	var err error
@@ -376,15 +378,26 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 	radarMu.Lock()
 	defer radarMu.Unlock()
 
+	// Return cached version to keep the table stable and prevent re-querying jitter on every refresh
+	if radarLoadedOnce {
+		return cachedClusterVersions, cachedClusterMode
+	}
+
 	if liveVersions, err := discoverClusterVersions(); err == nil && len(liveVersions) > 0 {
+		cachedClusterVersions = liveVersions
+		cachedClusterMode = "cluster-live"
+		radarLoadedOnce = true
 		return liveVersions, "cluster-live"
 	}
 
 	if len(customRadar) > 0 {
+		cachedClusterVersions = customRadar
+		cachedClusterMode = "config-file"
+		radarLoadedOnce = true
 		return customRadar, "config-file"
 	}
 
-	return []SoftwareVersion{
+	fallback := []SoftwareVersion{
 		{
 			Name:           "kube-prometheus-stack",
 			Category:       "Monitoring Namespace Workload",
@@ -427,7 +440,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 		},
 		{
 			Name:           "n8n",
-			Category:       "Monitoring Namespace Workload",
+			Category:       "Workflow Automation",
 			CurrentVersion: "1.38.2",
 			LatestVersion:  "1.75.1",
 			Status:         "upgrade-available",
@@ -445,7 +458,12 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 			ReleasedAt:     "3 weeks ago",
 			Source:         "static-demo",
 		},
-	}, "static-demo"
+	}
+
+	cachedClusterVersions = fallback
+	cachedClusterMode = "static-demo"
+	radarLoadedOnce = true
+	return fallback, "static-demo"
 }
 
 func upsertRadarVersion(sv SoftwareVersion) {
@@ -486,6 +504,7 @@ func upsertRadarVersion(sv SoftwareVersion) {
 	if !found {
 		customRadar = append(customRadar, sv)
 	}
+	cachedClusterVersions = customRadar
 }
 
 func generateAIInsights() []AIInsight {
@@ -674,10 +693,6 @@ func getDashboardHTML() string {
     .badge-status-security { background: #fed7d7; color: #c53030; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; }
     .source-tag { background: #ebf8ff; color: #3182ce; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; }
 
-    /* Instructions Box */
-    .aks-banner { background: var(--ai-bg); border: 1px solid var(--ai-border); border-radius: 6px; padding: 16px 20px; margin-bottom: 20px; font-size: 13px; color: var(--ai-text); line-height: 1.6; }
-    .aks-banner code { background: var(--panel); padding: 2px 6px; border-radius: 3px; font-family: monospace; }
-
     /* Modal */
     .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 100; }
     .modal-overlay.active { display: flex; }
@@ -714,13 +729,6 @@ func getDashboardHTML() string {
 
     <!-- PAGE 1: VERSION RADAR (DEFAULT) -->
     <section id="page-radar" class="page-section active">
-      <div class="aks-banner">
-        <strong>💡 Connecting your Kubernetes / AKS 'monitoring' Namespace:</strong><br>
-        To allow CloudOps Cockpit to inspect workloads specifically in your <code>monitoring</code> namespace:<br>
-        1. Set your kubeconfig context: <code>az aks get-credentials --resource-group &lt;group&gt; --name &lt;cluster-name&gt;</code><br>
-        2. Set environment variable: <code>$env:KUBECONFIG="$HOME\.kube\config"</code> (PowerShell)<br>
-        3. (Optional) Customize target namespace via: <code>$env:MONITORING_NAMESPACE="monitoring"</code>
-      </div>
       <article class="panel">
         <div class="panel-heading">
           <h2>Open-Source Version Radar & Upgrade Assistant</h2>
@@ -967,7 +975,7 @@ func getDashboardHTML() string {
       if (globalData.mode === 'cluster-live') {
         modeLabel.textContent = "Mode: Connected to Live 'monitoring' Namespace 🟢";
       } else {
-        modeLabel.textContent = "Mode: Enterprise Demo / Config 🛡️ (Targeting 'monitoring' namespace via KUBECONFIG)";
+        modeLabel.textContent = "Mode: Enterprise Demo / Config 🛡️ (Cluster connection optional)";
       }
 
       if (!globalData.radar || globalData.radar.length === 0) {
@@ -1170,7 +1178,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.16.2-unified-category",
+			"version":        "0.17.0-stable-radar",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),

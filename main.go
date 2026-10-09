@@ -66,20 +66,20 @@ type LogEntry struct {
 }
 
 type AIInsight struct {
-	Severity    string `json:"severity"` // "info", "warning", "critical"
+	Severity    string `json:"severity"`
 	Title       string `json:"title"`
 	ServiceName string `json:"service_name"`
 	Description string `json:"description"`
 }
 
 type SoftwareVersion struct {
-	Name          string `json:"name"`
-	Category      string `json:"category"`
+	Name           string `json:"name"`
+	Category       string `json:"category"`
 	CurrentVersion string `json:"current_version"`
 	LatestVersion  string `json:"latest_version"`
-	Status        string `json:"status"` // "up-to-date", "upgrade-available", "security-update"
-	ReleaseNotes  string `json:"release_notes"`
-	ReleasedAt    string `json:"released_at"`
+	Status         string `json:"status"`
+	ReleaseNotes   string `json:"release_notes"`
+	ReleasedAt     string `json:"released_at"`
 }
 
 var db *sql.DB
@@ -244,7 +244,6 @@ func getLogs() ([]LogEntry, error) {
 	return logs, nil
 }
 
-// Version Radar Registry: Checks deployed open-source tools against latest releases & advisories
 func getVersionRadar() []SoftwareVersion {
 	return []SoftwareVersion{
 		{
@@ -306,9 +305,7 @@ func getVersionRadar() []SoftwareVersion {
 
 func generateAIInsights() []AIInsight {
 	var insights []AIInsight
-
 	spans, _ := getSpans()
-	logs, _ := getLogs()
 
 	serviceStats := make(map[string]struct {
 		total  int
@@ -334,33 +331,9 @@ func generateAIInsights() []AIInsight {
 				Severity:    "critical",
 				ServiceName: svc,
 				Title:       fmt.Sprintf("High Error Rate in %s", svc),
-				Description: fmt.Sprintf("AI detected an elevated error rate of %.1f%% (%d/%d requests failed). Immediate investigation recommended.", (float64(stats.errors)/float64(stats.total))*100, stats.errors, stats.total),
+				Description: fmt.Sprintf("AI detected an elevated error rate of %.1f%% (%d/%d requests failed).", (float64(stats.errors)/float64(stats.total))*100, stats.errors, stats.total),
 			})
 		}
-		if stats.maxDur > 200 {
-			insights = append(insights, AIInsight{
-				Severity:    "warning",
-				ServiceName: svc,
-				Title:       fmt.Sprintf("Performance Latency Spike (%dms)", stats.maxDur),
-				Description: fmt.Sprintf("Service %s recorded a slow execution span. Check database or network bottlenecks.", svc),
-			})
-		}
-	}
-
-	errorLogsCount := 0
-	for _, l := range logs {
-		if l.Level == "ERROR" {
-			errorLogsCount++
-		}
-	}
-
-	if errorLogsCount > 0 {
-		insights = append(insights, AIInsight{
-			Severity:    "warning",
-			ServiceName: "System-Wide",
-			Title:       fmt.Sprintf("%d Critical Log Error(s) Captured", errorLogsCount),
-			Description: "AI log analyzer identified recurring error logs indicating potential exceptions or timeouts across connected microservices.",
-		})
 	}
 
 	if len(insights) == 0 {
@@ -368,10 +341,9 @@ func generateAIInsights() []AIInsight {
 			Severity:    "info",
 			ServiceName: "Cluster",
 			Title:       "All Systems Operating Normally",
-			Description: "AI telemetry analysis shows stable latencies, nominal error rates, and normal telemetry flow across all active services.",
+			Description: "AI telemetry analysis shows stable latencies and nominal error rates.",
 		})
 	}
-
 	return insights
 }
 
@@ -407,19 +379,7 @@ func seedDemoData() {
 		Value:       1280,
 		Timestamp:   time.Now().Add(-5 * time.Minute),
 	})
-	addMetric(MetricPoint{
-		ServiceName: "payment-api",
-		MetricName:  "http_requests_total",
-		Value:       435,
-		Timestamp:   time.Now().Add(-5 * time.Minute),
-	})
 
-	addLog(LogEntry{
-		ServiceName: "auth-service",
-		Level:       "INFO",
-		Message:     "User authenticated successfully for admin@example.com",
-		Timestamp:   time.Now().Add(-8 * time.Second),
-	})
 	addLog(LogEntry{
 		ServiceName: "payment-api",
 		Level:       "ERROR",
@@ -452,11 +412,21 @@ func getDashboardHTML() string {
     .topbar { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
     h1, h2, p { margin: 0; } h1 { font-size: 32px; letter-spacing: -.03em; }
     .eyebrow { color: var(--teal); font-size: 11px; font-weight: 800; letter-spacing: .12em; margin-bottom: 6px; }
+    
+    /* Navigation Bar */
+    .nav-bar { display: flex; gap: 10px; margin-bottom: 24px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+    .nav-btn { background: var(--panel); border: 1px solid var(--line); color: var(--muted); border-radius: 6px; padding: 10px 18px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+    .nav-btn.active { background: var(--teal); color: #fff; border-color: var(--teal); }
+
     .badge-group { display: flex; gap: 10px; align-items: center; }
     .badge { background: var(--panel); border: 1px solid var(--line); color: var(--teal); border-radius: 99px; padding: 6px 14px; font-size: 11px; font-weight: 800; }
     .btn { background: var(--btn-bg); border: 1px solid var(--line); color: var(--ink); border-radius: 99px; padding: 6px 14px; font-size: 11px; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
     .btn-primary { background: var(--teal); color: #fff; border-color: var(--teal); }
-    
+
+    /* Page Sections */
+    .page-section { display: none; }
+    .page-section.active { display: block; }
+
     /* AI Insights Panel */
     .ai-panel { background: var(--ai-bg); border: 1px solid var(--ai-border); border-radius: 6px; padding: 20px; margin-bottom: 24px; }
     .ai-header { display: flex; align-items: center; gap: 8px; font-weight: 800; color: var(--ai-text); font-size: 14px; margin-bottom: 12px; letter-spacing: .06em; text-transform: uppercase; }
@@ -478,7 +448,6 @@ func getDashboardHTML() string {
     .toolbar { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 20px; margin-bottom: 24px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
     .search-input { flex: 1; min-width: 240px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); font: inherit; outline: none; }
     .controls { display: flex; gap: 12px; align-items: center; }
-    .select-box { padding: 9px 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); font: inherit; outline: none; cursor: pointer; }
 
     /* Chart Panel */
     .chart-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 20px 24px; margin-bottom: 24px; }
@@ -527,89 +496,57 @@ func getDashboardHTML() string {
       </div>
       <div class="badge-group">
         <button class="btn" onclick="toggleTheme()">🌓 Theme</button>
-        <span class="badge">AI + RADAR</span>
+        <span class="badge">PRO EDITION</span>
       </div>
     </header>
 
-    <!-- AI Observability Assistant Panel -->
-    <section class="ai-panel">
-      <div class="ai-header">🤖 AI Observability Assistant & Root-Cause Analyzer</div>
-      <div class="ai-insights-grid" id="ai-insights-container">
-        <div class="ai-card info">
-          <div class="ai-card-title">Analyzing Telemetry...</div>
-          <div class="ai-card-desc">AI engine is evaluating traces, logs, and error rates.</div>
-        </div>
-      </div>
-    </section>
+    <!-- Navigation Bar -->
+    <nav class="nav-bar">
+      <button class="nav-btn active" onclick="switchPage('radar', event)">🛰️ Version Radar</button>
+      <button class="nav-btn" onclick="switchPage('traces', event)">📊 Live Traces & Latency</button>
+      <button class="nav-btn" onclick="switchPage('metrics', event)">📈 Metrics Stream</button>
+      <button class="nav-btn" onclick="switchPage('logs', event)">📝 Structured Logs</button>
+      <button class="nav-btn" onclick="switchPage('ai', event)">🤖 AI Assistant</button>
+    </nav>
 
-    <!-- KPI Summary Cards -->
-    <section class="kpi-grid">
-      <div class="kpi-card">
-        <div class="label">Total Traces</div>
-        <div class="value" id="kpi-traces">0</div>
-      </div>
-      <div class="kpi-card">
-        <div class="label">Error Rate</div>
-        <div class="value" id="kpi-errors">0%</div>
-      </div>
-      <div class="kpi-card">
-        <div class="label">Active Services</div>
-        <div class="value" id="kpi-services">0</div>
-      </div>
-      <div class="kpi-card">
-        <div class="label">Total Logs</div>
-        <div class="value" id="kpi-logs">0</div>
-      </div>
-    </section>
-
-    <!-- Visual Latency Sparkline Chart -->
-    <section class="chart-panel">
-      <div class="panel-heading" style="margin-bottom:0;">
-        <h2>Trace Latency Distribution</h2>
-        <span class="muted">Last requests (ms)</span>
-      </div>
-      <div class="chart-bars" id="latency-chart">
-        <span class="muted" style="margin: auto; font-size: 13px;">No trace latency data available</span>
-      </div>
-    </section>
-
-    <!-- Search, Filter & Controls Toolbar -->
-    <section class="toolbar">
-      <input type="text" id="search-box" class="search-input" placeholder="🔍 Filter by service name, operation, or keyword..." oninput="filterData()">
-      <div class="controls">
-        <label class="muted" style="font-size:12px; font-weight:700;">Refresh:
-          <select id="refresh-interval" class="select-box" onchange="updateInterval()">
-            <option value="3000">3s</option>
-            <option value="5000">5s</option>
-            <option value="10000">10s</option>
-            <option value="0">Paused</option>
-          </select>
-        </label>
-        <button class="btn btn-primary" onclick="simulateTelemetry()">🧪 Test Telemetry</button>
-        <button class="btn" onclick="exportJSON()">📥 Export JSON</button>
-      </div>
-    </section>
-
-    <!-- Version Radar & Upgrade Assistant Panel -->
-    <article class="panel">
-      <div class="panel-heading">
-        <h2>🛰️ Open-Source Version Radar & Upgrade Assistant</h2>
-        <span class="muted">Monitoring Helm charts, images & community tools</span>
-      </div>
-      <table>
-        <thead>
-          <tr><th>Software / Stack</th><th>Category</th><th>Current</th><th>Latest</th><th>Status</th><th>Action</th></tr>
-        </thead>
-        <tbody id="radar-table">
-          <tr><td colspan="6" style="text-align:center; color: var(--muted);">Loading version radar...</td></tr>
-        </tbody>
-      </table>
-    </article>
-
-    <section class="grid">
-      <article class="panel" style="margin-bottom:0;">
+    <!-- PAGE 1: VERSION RADAR (DEFAULT) -->
+    <section id="page-radar" class="page-section active">
+      <article class="panel">
         <div class="panel-heading">
-          <h2>Live Traces</h2>
+          <h2>Open-Source Version Radar & Upgrade Assistant</h2>
+          <span class="muted">Tracking Helm charts, images & community tools</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Software / Stack</th><th>Category</th><th>Current</th><th>Latest</th><th>Status</th><th>Action</th></tr>
+          </thead>
+          <tbody id="radar-table">
+            <tr><td colspan="6" style="text-align:center; color: var(--muted);">Loading version radar...</td></tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <!-- PAGE 2: LIVE TRACES -->
+    <section id="page-traces" class="page-section">
+      <section class="toolbar">
+        <input type="text" id="search-traces" class="search-input" placeholder="🔍 Filter traces by service name or operation..." oninput="filterData()">
+        <div class="controls">
+          <button class="btn btn-primary" onclick="simulateTelemetry()">🧪 Test Telemetry</button>
+        </div>
+      </section>
+      <section class="chart-panel">
+        <div class="panel-heading" style="margin-bottom:0;">
+          <h2>Trace Latency Distribution</h2>
+          <span class="muted">Last requests (ms)</span>
+        </div>
+        <div class="chart-bars" id="latency-chart">
+          <span class="muted" style="margin: auto; font-size: 13px;">No trace latency data available</span>
+        </div>
+      </section>
+      <article class="panel">
+        <div class="panel-heading">
+          <h2>Live Traces Stream</h2>
           <span class="muted" id="trace-count">0 items</span>
         </div>
         <table>
@@ -621,8 +558,14 @@ func getDashboardHTML() string {
           </tbody>
         </table>
       </article>
+    </section>
 
-      <article class="panel" style="margin-bottom:0;">
+    <!-- PAGE 3: METRICS STREAM -->
+    <section id="page-metrics" class="page-section">
+      <section class="toolbar">
+        <input type="text" id="search-metrics" class="search-input" placeholder="🔍 Filter metrics by service name or metric name..." oninput="filterData()">
+      </section>
+      <article class="panel">
         <div class="panel-heading">
           <h2>Metrics Stream</h2>
           <span class="muted" id="metric-count">0 items</span>
@@ -638,20 +581,59 @@ func getDashboardHTML() string {
       </article>
     </section>
 
-    <article class="panel">
-      <div class="panel-heading">
-        <h2>Structured Logs</h2>
-        <span class="muted" id="log-count">0 items</span>
-      </div>
-      <table>
-        <thead>
-          <tr><th>Time</th><th>Service</th><th>Level</th><th>Message</th></tr>
-        </thead>
-        <tbody id="logs-table">
-          <tr><td colspan="4" style="text-align:center; color: var(--muted);">Loading logs...</td></tr>
-        </tbody>
-      </table>
-    </article>
+    <!-- PAGE 4: STRUCTURED LOGS -->
+    <section id="page-logs" class="page-section">
+      <section class="toolbar">
+        <input type="text" id="search-logs" class="search-input" placeholder="🔍 Filter logs by service name, level, or keyword..." oninput="filterData()">
+      </section>
+      <article class="panel">
+        <div class="panel-heading">
+          <h2>Structured Logs</h2>
+          <span class="muted" id="log-count">0 items</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Service</th><th>Level</th><th>Message</th></tr>
+          </thead>
+          <tbody id="logs-table">
+            <tr><td colspan="4" style="text-align:center; color: var(--muted);">Loading logs...</td></tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <!-- PAGE 5: AI ASSISTANT -->
+    <section id="page-ai" class="page-section">
+      <section class="ai-panel">
+        <div class="ai-header">🤖 AI Observability Assistant & Root-Cause Analyzer</div>
+        <div class="ai-insights-grid" id="ai-insights-container">
+          <div class="ai-card info">
+            <div class="ai-card-title">Analyzing Telemetry...</div>
+            <div class="ai-card-desc">AI engine is evaluating traces, logs, and error rates.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="kpi-grid">
+        <div class="kpi-card">
+          <div class="label">Total Traces</div>
+          <div class="value" id="kpi-traces">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="label">Error Rate</div>
+          <div class="value" id="kpi-errors">0%</div>
+        </div>
+        <div class="kpi-card">
+          <div class="label">Active Services</div>
+          <div class="value" id="kpi-services">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="label">Total Logs</div>
+          <div class="value" id="kpi-logs">0</div>
+        </div>
+      </section>
+    </section>
+
   </main>
 
   <!-- Interactive Detail Modal -->
@@ -679,6 +661,19 @@ func getDashboardHTML() string {
 
     const savedTheme = localStorage.getItem("cloudops-theme") || "light";
     document.documentElement.setAttribute("data-theme", savedTheme);
+
+    function switchPage(pageId, evt) {
+      document.querySelectorAll(".page-section").forEach(function(sec) {
+        sec.classList.remove("active");
+      });
+      document.querySelectorAll(".nav-btn").forEach(function(btn) {
+        btn.classList.remove("active");
+      });
+      document.querySelector("#page-" + pageId).classList.add("active");
+      if (evt && evt.currentTarget) {
+        evt.currentTarget.classList.add("active");
+      }
+    }
 
     async function fetchData() {
       try {
@@ -779,27 +774,23 @@ func getDashboardHTML() string {
     }
 
     function filterData() {
-      const q = (document.querySelector("#search-box").value || "").toLowerCase().trim();
+      const qTraces = (document.querySelector("#search-traces")?.value || "").toLowerCase().trim();
+      const qMetrics = (document.querySelector("#search-metrics")?.value || "").toLowerCase().trim();
+      const qLogs = (document.querySelector("#search-logs")?.value || "").toLowerCase().trim();
       
       const filteredTraces = globalData.traces.filter(function(s) {
-        if (!q) return true;
-        return (s.service_name || "").toLowerCase().includes(q) || 
-               (s.operation_name || "").toLowerCase().includes(q) ||
-               String(s.status_code).includes(q);
+        if (!qTraces) return true;
+        return (s.service_name || "").toLowerCase().includes(qTraces) || (s.operation_name || "").toLowerCase().includes(qTraces);
       });
 
       const filteredMetrics = globalData.metrics.filter(function(m) {
-        if (!q) return true;
-        return (m.service_name || "").toLowerCase().includes(q) || 
-               (m.metric_name || "").toLowerCase().includes(q) ||
-               String(m.value).includes(q);
+        if (!qMetrics) return true;
+        return (m.service_name || "").toLowerCase().includes(qMetrics) || (m.metric_name || "").toLowerCase().includes(qMetrics);
       });
 
       const filteredLogs = globalData.logs.filter(function(l) {
-        if (!q) return true;
-        return (l.service_name || "").toLowerCase().includes(q) || 
-               (l.message || "").toLowerCase().includes(q) || 
-               (l.level || "").toLowerCase().includes(q);
+        if (!qLogs) return true;
+        return (l.service_name || "").toLowerCase().includes(qLogs) || (l.message || "").toLowerCase().includes(qLogs) || (l.level || "").toLowerCase().includes(qLogs);
       });
       
       renderTables({ traces: filteredTraces, metrics: filteredMetrics, logs: filteredLogs });
@@ -896,24 +887,6 @@ func getDashboardHTML() string {
       }
     }
 
-    function exportJSON() {
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(globalData, null, 2));
-      const dlAnchor = document.createElement('a');
-      dlAnchor.setAttribute("href", dataStr);
-      dlAnchor.setAttribute("download", "cloudops-telemetry-export.json");
-      document.body.appendChild(dlAnchor);
-      dlAnchor.click();
-      dlAnchor.remove();
-    }
-
-    function updateInterval() {
-      const interval = parseInt(document.querySelector("#refresh-interval").value, 10);
-      if (refreshTimer) clearInterval(refreshTimer);
-      if (interval > 0) {
-        refreshTimer = setInterval(fetchData, interval);
-      }
-    }
-
     function showReleaseNotes(r) {
       document.querySelector("#modal-title").textContent = r.name + " (" + r.latest_version + ") Release Notes";
       document.querySelector("#modal-content").textContent = "Category: " + r.category + "\nCurrent Version: " + r.current_version + "\nLatest Version: " + r.latest_version + "\nReleased: " + r.released_at + "\n\nRelease Highlights:\n" + r.release_notes;
@@ -958,7 +931,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.10.0-version-radar",
+			"version":        "0.11.0-multipage-gui",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),

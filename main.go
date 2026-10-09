@@ -265,7 +265,7 @@ func getLogs() ([]LogEntry, error) {
 	return logs, nil
 }
 
-// Universal Kubernetes resource & helm release scanner across any namespace
+// Target specifically the "monitoring" namespace in Kubernetes / AKS
 func discoverClusterVersions() ([]SoftwareVersion, error) {
 	var k8sConfig *rest.Config
 	var err error
@@ -291,16 +291,18 @@ func discoverClusterVersions() ([]SoftwareVersion, error) {
 		return nil, err
 	}
 
-	// Scan Deployments, StatefulSets, and DaemonSets across all namespaces
-	var items []struct {
-		name      string
-		namespace string
-		containers []struct {
-			image string
-		}
+	targetNamespace := os.Getenv("MONITORING_NAMESPACE")
+	if targetNamespace == "" {
+		targetNamespace = "monitoring"
 	}
 
-	deployments, err := clientset.AppsV1().Deployments("").List(context.TODO(), metav1.ListOptions{})
+	var items []struct {
+		name       string
+		namespace  string
+		containers []struct{ image string }
+	}
+
+	deployments, err := clientset.AppsV1().Deployments(targetNamespace).List(context.TODO(), metav1.ListOptions{})
 	if err == nil {
 		for _, d := range deployments.Items {
 			var cs []struct{ image string }
@@ -315,7 +317,7 @@ func discoverClusterVersions() ([]SoftwareVersion, error) {
 		}
 	}
 
-	statefulsets, err := clientset.AppsV1().StatefulSets("").List(context.TODO(), metav1.ListOptions{})
+	statefulsets, err := clientset.AppsV1().StatefulSets(targetNamespace).List(context.TODO(), metav1.ListOptions{})
 	if err == nil {
 		for _, ss := range statefulsets.Items {
 			var cs []struct{ image string }
@@ -344,7 +346,6 @@ func discoverClusterVersions() ([]SoftwareVersion, error) {
 			lowerImg := strings.ToLower(container.image)
 			var toolName, category string
 
-			// Universal keyword matching for monitoring & community stacks
 			if strings.Contains(lowerImg, "grafana") {
 				toolName = "Grafana"
 				category = "Dashboard & Visualization"
@@ -367,10 +368,9 @@ func discoverClusterVersions() ([]SoftwareVersion, error) {
 				toolName = "OpenTelemetry Collector"
 				category = "Telemetry Pipeline"
 			} else {
-				// Capture custom workloads from user's namespace automatically
 				parts := strings.Split(imageName, "/")
 				toolName = parts[len(parts)-1]
-				category = "Custom AKS Workload (" + workload.namespace + ")"
+				category = "Monitoring Namespace Workload"
 			}
 
 			status := "up-to-date"
@@ -388,9 +388,9 @@ func discoverClusterVersions() ([]SoftwareVersion, error) {
 				CurrentVersion: imageTag,
 				LatestVersion:  latest,
 				Status:         status,
-				ReleaseNotes:   fmt.Sprintf("Discovered live from cluster workload '%s' in namespace '%s'. Full Image: %s", workload.name, workload.namespace, container.image),
+				ReleaseNotes:   fmt.Sprintf("Discovered live from '%s' namespace workload '%s'. Full Image: %s", targetNamespace, workload.name, container.image),
 				ReleasedAt:     "Cluster Active",
-				Source:         "cluster-live",
+				Source:         "cluster-live (" + targetNamespace + ")",
 			}
 		}
 	}
@@ -406,17 +406,14 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 	radarMu.Lock()
 	defer radarMu.Unlock()
 
-	// 1. Try discovering live versions from connected cluster
 	if liveVersions, err := discoverClusterVersions(); err == nil && len(liveVersions) > 0 {
 		return liveVersions, "cluster-live"
 	}
 
-	// 2. Fallback to custom config radar if configured
 	if len(customRadar) > 0 {
 		return customRadar, "config-file"
 	}
 
-	// 3. Ultimate fallback: static enterprise demo radar
 	return []SoftwareVersion{
 		{
 			Name:           "kube-prometheus-stack",
@@ -728,7 +725,7 @@ func getDashboardHTML() string {
       <div>
         <p class="eyebrow">ENTERPRISE OBSERVABILITY ENGINE</p>
         <h1>CloudOps Cockpit</h1>
-        <p class="muted">Unified OTLP Traces, Metrics, Logs, & Live AKS Version Radar Console.</p>
+        <p class="muted">Unified OTLP Traces, Metrics, Logs, & Live 'monitoring' Namespace Radar.</p>
       </div>
       <div class="badge-group">
         <button class="btn" onclick="toggleTheme()">🌓 Theme</button>
@@ -748,10 +745,11 @@ func getDashboardHTML() string {
     <!-- PAGE 1: VERSION RADAR (DEFAULT) -->
     <section id="page-radar" class="page-section active">
       <div class="aks-banner">
-        <strong>💡 How to Connect Your AKS / Kubernetes Cluster:</strong><br>
-        To allow CloudOps Cockpit to automatically discover your deployed workloads and monitoring tools from your cluster, log into your Azure / K8s cluster and set your kubeconfig path:<br>
-        1. Run <code>az aks get-credentials --resource-group &lt;group&gt; --name &lt;cluster-name&gt;</code><br>
-        2. Set environment variable: <code>$env:KUBECONFIG="$HOME\.kube\config"</code> (PowerShell) or restart your app.
+        <strong>💡 Connecting your Kubernetes / AKS 'monitoring' Namespace:</strong><br>
+        To allow CloudOps Cockpit to inspect workloads specifically in your <code>monitoring</code> namespace:<br>
+        1. Set your kubeconfig context: <code>az aks get-credentials --resource-group &lt;group&gt; --name &lt;cluster-name&gt;</code><br>
+        2. Set environment variable: <code>$env:KUBECONFIG="$HOME\.kube\config"</code> (PowerShell)<br>
+        3. (Optional) Customize target namespace via: <code>$env:MONITORING_NAMESPACE="monitoring"</code>
       </div>
       <article class="panel">
         <div class="panel-heading">
@@ -997,13 +995,13 @@ func getDashboardHTML() string {
       const modeLabel = document.querySelector("#radar-mode-label");
       
       if (globalData.mode === 'cluster-live') {
-        modeLabel.textContent = "Mode: Connected to Live Cluster / AKS 🟢";
+        modeLabel.textContent = "Mode: Connected to Live 'monitoring' Namespace 🟢";
       } else {
-        modeLabel.textContent = "Mode: Enterprise Demo / Config 🛡️ (Set KUBECONFIG or deploy inside cluster to view live data)";
+        modeLabel.textContent = "Mode: Enterprise Demo / Config 🛡️ (Targeting 'monitoring' namespace via KUBECONFIG)";
       }
 
       if (!globalData.radar || globalData.radar.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--muted);">No software versions tracked.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--muted);">No software versions tracked in monitoring namespace.</td></tr>';
         return;
       }
       tbody.innerHTML = globalData.radar.map(function(r) {
@@ -1013,7 +1011,7 @@ func getDashboardHTML() string {
         } else if (r.status === 'security-update') {
           badgeHtml = '<span class="badge-status-security">Security Patch</span>';
         }
-        let sourceTag = r.source === 'cluster-live' ? '<span class="source-tag">Live AKS</span>' : '<span class="source-tag" style="background:#edf2f7; color:#4a5568;">Static Config</span>';
+        let sourceTag = r.source.includes('cluster-live') ? '<span class="source-tag">Live Namespace</span>' : '<span class="source-tag" style="background:#edf2f7; color:#4a5568;">Static Config</span>';
         return '<tr>' +
           '<td class="col-name"><strong>' + r.name + '</strong></td>' +
           '<td class="col-cat"><span class="tag">' + r.category + '</span></td>' +
@@ -1202,7 +1200,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.15.0-aligned-radar",
+			"version":        "0.16.1-monitoring-namespace",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),
@@ -1327,7 +1325,7 @@ func main() {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
-            return
+			return
 		}
 		defer r.Body.Close()
 

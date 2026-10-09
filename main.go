@@ -300,26 +300,19 @@ func discoverClusterHelmReleases() ([]SoftwareVersion, error) {
 
 	var results []SoftwareVersion
 	for _, rel := range releases {
-		// Example chart format: kube-prometheus-stack-51.6.0
-		chartParts := strings.Split(rel.Chart, "-")
-		chartVersion := "v1.0.0"
-		if len(chartParts) > 1 {
-			chartVersion = chartParts[len(chartParts)-1]
-		}
-
 		status := "up-to-date"
-		latest := chartVersion
+		latest := rel.Chart
 		if strings.Contains(strings.ToLower(rel.Name), "prometheus") {
-			latest = "68.4.0"
+			latest = "kube-prometheus-stack-68.4.0"
 			status = "upgrade-available"
 		} else if strings.Contains(strings.ToLower(rel.Name), "loki") {
-			latest = "3.3.2"
+			latest = "loki-distributed-3.3.2"
 			status = "upgrade-available"
 		} else if strings.Contains(strings.ToLower(rel.Name), "mimir") {
-			latest = "5.0.0"
+			latest = "mimir-distributed-5.0.0"
 			status = "upgrade-available"
 		} else if strings.Contains(strings.ToLower(rel.Name), "tempo") {
-			latest = "2.6.1"
+			latest = "tempo-distributed-2.6.1"
 			status = "upgrade-available"
 		}
 
@@ -342,7 +335,6 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 	radarMu.Lock()
 	defer radarMu.Unlock()
 
-	// Always attempt live discovery using `helm ls` if available
 	if liveVersions, err := discoverClusterHelmReleases(); err == nil && len(liveVersions) > 0 {
 		cachedClusterVersions = liveVersions
 		cachedClusterMode = "cluster-helm"
@@ -365,7 +357,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 			Name:           "kube-prometheus-stack",
 			Category:       "Monitoring Namespace Workload",
 			CurrentVersion: "kube-prometheus-stack-51.6.0",
-			LatestVersion:  "68.4.0",
+			LatestVersion:  "kube-prometheus-stack-68.4.0",
 			Status:         "upgrade-available",
 			ReleaseNotes:   "Major CRD updates, Prometheus v3.0 support, and enhanced Kubernetes 1.32 compatibility.",
 			ReleasedAt:     "2 days ago",
@@ -375,7 +367,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 			Name:           "loki-distributed",
 			Category:       "Monitoring Namespace Workload",
 			CurrentVersion: "loki-distributed-0.69.16",
-			LatestVersion:  "3.3.2",
+			LatestVersion:  "loki-distributed-3.3.2",
 			Status:         "upgrade-available",
 			ReleaseNotes:   "Performance optimizations for chunk caching and reduced memory footprint.",
 			ReleasedAt:     "1 week ago",
@@ -385,7 +377,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 			Name:           "mimir-distributed",
 			Category:       "Monitoring Namespace Workload",
 			CurrentVersion: "mimir-distributed-4.4.1",
-			LatestVersion:  "5.0.0",
+			LatestVersion:  "mimir-distributed-5.0.0",
 			Status:         "upgrade-available",
 			ReleaseNotes:   "Multi-tenant storage enhancements and reduced TSDB indexing overhead.",
 			ReleasedAt:     "3 weeks ago",
@@ -395,7 +387,7 @@ func getVersionRadar() ([]SoftwareVersion, string) {
 			Name:           "tempo-distributed",
 			Category:       "Monitoring Namespace Workload",
 			CurrentVersion: "tempo-distributed-1.11.0",
-			LatestVersion:  "2.6.1",
+			LatestVersion:  "tempo-distributed-2.6.1",
 			Status:         "upgrade-available",
 			ReleaseNotes:   "Improved block compaction speeds and OTLP native metrics export.",
 			ReleasedAt:     "2 weeks ago",
@@ -608,21 +600,12 @@ func getDashboardHTML() string {
     .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 24px; margin-bottom: 20px; }
     .panel-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
     
-    /* Clean Table Layout with proper column spacing */
+    /* Flexible Table Layout removing fixed widths to prevent clipping long chart names */
     .table-container { width: 100%; overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; text-align: left; table-layout: fixed; }
-    th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; padding: 14px 12px; border-bottom: 2px solid var(--line); background: var(--paper); }
-    td { padding: 16px 12px; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; padding: 14px 12px; border-bottom: 2px solid var(--line); background: var(--paper); white-space: nowrap; }
+    td { padding: 16px 12px; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: middle; word-break: break-word; }
     tbody tr:hover { background: var(--hover); }
-    
-    /* Column Widths for Radar */
-    th.col-name, td.col-name { width: 22%; }
-    th.col-cat, td.col-cat { width: 20%; }
-    th.col-ver, td.col-ver { width: 12%; }
-    th.col-status, td.col-status { width: 16%; }
-    th.col-source, td.col-source { width: 14%; }
-    th.col-action, td.col-action { width: 16%; text-align: right; }
-    td.col-action { text-align: right; }
 
     .tag { background: var(--paper); border: 1px solid var(--line); color: var(--teal); padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; display: inline-block; }
     .status-error { color: var(--orange); font-weight: 700; }
@@ -631,10 +614,10 @@ func getDashboardHTML() string {
     .log-warn { color: #d69e2e; font-weight: 700; }
     .log-info { color: #3182ce; font-weight: 700; }
     
-    .badge-status-up { background: #e2f0ea; color: #147d76; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; }
-    .badge-status-upgrade { background: #fcebdd; color: #d66c3c; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; }
-    .badge-status-security { background: #fed7d7; color: #c53030; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; }
-    .source-tag { background: #ebf8ff; color: #3182ce; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; }
+    .badge-status-up { background: #e2f0ea; color: #147d76; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; white-space: nowrap; }
+    .badge-status-upgrade { background: #fcebdd; color: #d66c3c; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; white-space: nowrap; }
+    .badge-status-security { background: #fed7d7; color: #c53030; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; white-space: nowrap; }
+    .source-tag { background: #ebf8ff; color: #3182ce; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; white-space: nowrap; }
 
     /* Modal */
     .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 100; }
@@ -681,17 +664,15 @@ func getDashboardHTML() string {
           <table>
             <thead>
               <tr>
-                <th class="col-name">Software / Stack</th>
-                <th class="col-cat">Category</th>
-                <th class="col-ver">Current</th>
-                <th class="col-ver">Latest</th>
-                <th class="col-status">Status</th>
-                <th class="col-source">Source</th>
-                <th class="col-action">Action</th>
+                <th>Software / Stack</th>
+                <th>Current</th>
+                <th>Latest</th>
+                <th>Status</th>
+                <th style="text-align: right;">Action</th>
               </tr>
             </thead>
             <tbody id="radar-table">
-              <tr><td colspan="7" style="text-align:center; color: var(--muted);">Loading version radar...</td></tr>
+              <tr><td colspan="5" style="text-align:center; color: var(--muted);">Loading version radar...</td></tr>
             </tbody>
           </table>
         </div>
@@ -922,7 +903,7 @@ func getDashboardHTML() string {
       }
 
       if (!globalData.radar || globalData.radar.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--muted);">No Helm releases tracked in monitoring namespace.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--muted);">No Helm releases tracked in monitoring namespace.</td></tr>';
         return;
       }
       tbody.innerHTML = globalData.radar.map(function(r) {
@@ -932,15 +913,12 @@ func getDashboardHTML() string {
         } else if (r.status === 'security-update') {
           badgeHtml = '<span class="badge-status-security">Security Patch</span>';
         }
-        let sourceTag = r.source.includes('cluster-helm') ? '<span class="source-tag">Live Helm</span>' : '<span class="source-tag" style="background:#edf2f7; color:#4a5568;">Static Config</span>';
         return '<tr>' +
-          '<td class="col-name"><strong>' + r.name + '</strong></td>' +
-          '<td class="col-cat"><span class="tag">' + r.category + '</span></td>' +
-          '<td class="col-ver">' + r.current_version + '</td>' +
-          '<td class="col-ver"><strong>' + r.latest_version + '</strong></td>' +
-          '<td class="col-status">' + badgeHtml + '</td>' +
-          '<td class="col-source">' + sourceTag + '</td>' +
-          '<td class="col-action"><button class="btn" onclick=\'showReleaseNotes(' + JSON.stringify(r) + ')\'>📖 Release Notes</button></td>' +
+          '<td><strong>' + r.name + '</strong></td>' +
+          '<td>' + r.current_version + '</td>' +
+          '<td><strong>' + r.latest_version + '</strong></td>' +
+          '<td>' + badgeHtml + '</td>' +
+          '<td style="text-align: right;"><button class="btn" onclick=\'showReleaseNotes(' + JSON.stringify(r) + ')\'>📖 Release Notes</button></td>' +
         '</tr>';
       }).join("");
     }
@@ -1121,7 +1099,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":         "healthy",
 			"name":           "CloudOps Observability Platform",
-			"version":        "0.21.0-helm-cli",
+			"version":        "0.22.0-clean-radar-table",
 			"active_spans":   len(spans),
 			"active_metrics": len(metrics),
 			"active_logs":    len(logs),

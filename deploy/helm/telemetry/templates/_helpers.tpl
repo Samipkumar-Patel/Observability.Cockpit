@@ -1,8 +1,8 @@
-{{- define "cloudops-cockpit.name" -}}
+{{- define "cloudops-telemetry.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "cloudops-cockpit.fullname" -}}
+{{- define "cloudops-telemetry.fullname" -}}
 {{- if .Values.fullnameOverride -}}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
 {{- else -}}
@@ -15,6 +15,6 @@
 {{- end -}}
 {{- end -}}
 
-{{- define "cloudops-cockpit.chart" -}}
+{{- define "cloudops-telemetry.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}

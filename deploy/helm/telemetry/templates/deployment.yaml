@@ -1,26 +1,26 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "cloudops-cockpit.fullname" . }}
+  name: {{ include "cloudops-telemetry.fullname" . }}
   labels:
-    app.kubernetes.io/name: {{ include "cloudops-cockpit.name" . }}
-    helm.sh/chart: {{ include "cloudops-cockpit.chart" . }}
+    app.kubernetes.io/name: {{ include "cloudops-telemetry.name" . }}
+    helm.sh/chart: {{ include "cloudops-telemetry.chart" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: {{ include "cloudops-cockpit.name" . }}
+      app.kubernetes.io/name: {{ include "cloudops-telemetry.name" . }}
       app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: {{ include "cloudops-cockpit.name" . }}
+        app.kubernetes.io/name: {{ include "cloudops-telemetry.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       containers:
-        - name: cockpit
+        - name: telemetry
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
@@ -53,7 +53,7 @@ spec:
         - name: storage
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:
-            claimName: {{ include "cloudops-cockpit.fullname" . }}-pvc
+            claimName: {{ include "cloudops-telemetry.fullname" . }}-pvc
           {{- else }}
           emptyDir: {}
           {{- end }}
@@ -62,10 +62,10 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "cloudops-cockpit.fullname" . }}-pvc
+  name: {{ include "cloudops-telemetry.fullname" . }}-pvc
   labels:
-    app.kubernetes.io/name: {{ include "cloudops-cockpit.name" . }}
-    helm.sh/chart: {{ include "cloudops-cockpit.chart" . }}
+    app.kubernetes.io/name: {{ include "cloudops-telemetry.name" . }}
+    helm.sh/chart: {{ include "cloudops-telemetry.chart" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:
@@ -82,10 +82,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "cloudops-cockpit.fullname" . }}
+  name: {{ include "cloudops-telemetry.fullname" . }}
   labels:
-    app.kubernetes.io/name: {{ include "cloudops-cockpit.name" . }}
-    helm.sh/chart: {{ include "cloudops-cockpit.chart" . }}
+    app.kubernetes.io/name: {{ include "cloudops-telemetry.name" . }}
+    helm.sh/chart: {{ include "cloudops-telemetry.chart" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:
@@ -96,17 +96,17 @@ spec:
       protocol: TCP
       name: http
   selector:
-    app.kubernetes.io/name: {{ include "cloudops-cockpit.name" . }}
+    app.kubernetes.io/name: {{ include "cloudops-telemetry.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 ---
 {{- if .Values.ingress.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "cloudops-cockpit.fullname" . }}
+  name: {{ include "cloudops-telemetry.fullname" . }}
   labels:
-    app.kubernetes.io/name: {{ include "cloudops-cockpit.name" . }}
-    helm.sh/chart: {{ include "cloudops-cockpit.chart" . }}
+    app.kubernetes.io/name: {{ include "cloudops-telemetry.name" . }}
+    helm.sh/chart: {{ include "cloudops-telemetry.chart" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
   {{- with .Values.ingress.annotations }}
@@ -125,7 +125,7 @@ spec:
             pathType: {{ .Values.ingress.pathType }}
             backend:
               service:
-                name: {{ include "cloudops-cockpit.fullname" . }}
+                name: {{ include "cloudops-telemetry.fullname" . }}
                 port:
                   number: {{ .Values.service.port }}
 {{- end }}

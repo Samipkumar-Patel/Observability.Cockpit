@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cloudops-telemetry
+description: A Helm chart for CloudOps Telemetry (OTLP Traces, Metrics, and Logs Ingestion Engine)
+type: application
+version: 0.1.0
+appVersion: "0.22.0"

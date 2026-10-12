@@ -17,7 +17,7 @@ Instead of managing Prometheus, Grafana, Loki, Tempo, and OpenTelemetry collecto
 4. **AI Observability Assistant & Root-Cause Analyzer:**
    - Automatically inspects stored telemetry for error-rate spikes, slow execution spans, and recurring log errors to generate actionable diagnostic cards.
 5. **Open-Source Version Radar & Upgrade Assistant:**
-   - Discovers deployed software and Helm releases specifically inside your cluster's `monitoring` namespace, checking current versions against the latest releases with security patch advisories and release notes.
+   - Discovers deployed Helm releases specifically inside your cluster's `monitoring` namespace (using read-only RBAC), checking current versions against the latest releases with security patch advisories and release notes.
 6. **Pro-Grade GUI Utilities:**
    - KPI Summary Cards, interactive search/filtering, visual latency sparkline distribution charts, customizable refresh intervals, built-in telemetry simulation, and one-click JSON data export.
 
@@ -38,29 +38,29 @@ docker run -d -p 8080:8080 -v cockpit-data:/data ghcr.io/samipkumar-patel/cloudo
 
 ---
 
-## Deployment Options
+## Modular Helm Charts & Deployment Options
 
-CloudOps Cockpit offers four ways to deploy depending on your infrastructure:
+CloudOps Cockpit offers separate modular Helm charts so you can deploy only the features you need.
 
-### 1. Local Development (Go Binary)
+### 1. Modular Helm Charts (AKS & Kubernetes)
+- **Version Radar Chart:**
+  ```bash
+  helm install cloudops-radar ./deploy/helm/radar --namespace observability --create-namespace
+  ```
+- **Telemetry Chart:**
+  ```bash
+  helm install cloudops-telemetry ./deploy/helm/telemetry --namespace observability --create-namespace
+  ```
+
+### 2. Local Development (Go Binary)
 ```bash
 go run main.go
 ```
 Open `http://localhost:8080`.
 
-### 2. Docker & Docker Compose
+### 3. Docker & Docker Compose
 ```bash
 docker compose up --build -d
-```
-
-### 3. Kubernetes / AKS (Raw Manifests)
-```bash
-kubectl apply -f deploy/kubernetes.yaml
-```
-
-### 4. Helm Chart (Production Kubernetes & AKS)
-```bash
-helm install cloudops-cockpit ./deploy/helm --namespace observability --create-namespace
 ```
 
 ---

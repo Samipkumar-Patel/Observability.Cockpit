@@ -1,10 +1,10 @@
 {
   "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.json.schema.json",
   "type": "datasource",
-  "name": "Custom Observability Data Source",
-  "id": "samipkumar-custom-datasource",
+  "name": "LLM Observability Data Source",
+  "id": "samipkumar-llm-datasource",
   "info": {
-    "description": "Custom Grafana data source plugin for querying custom telemetry and metrics engines.",
+    "description": "Grafana data source plugin for querying AI agent token consumption, prompt latency, and LLM telemetry.",
     "author": {
       "name": "Samipkumar Patel"
     },

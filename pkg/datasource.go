@@ -3,22 +3,21 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
-	"github.com/grafana/grafana-plugin-sdk-go/backend/datasource"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
+	"github.com/grafana/grafana-plugin-sdk-go/data"
 )
-
-// Ensure Datasource implements requisite interfaces
-var _ datasource.InstanceSettingsMarshaler = (*CustomDatasource)(nil)
 
 type CustomDatasource struct{}
 
-func NewCustomDatasource(setting backend.DataSourceInstanceSettings) (datasource.InstanceSettings, error) {
+func NewCustomDatasource(ctx context.Context, settings backend.DataSourceInstanceSettings) (instancemgmt.Instance, error) {
 	return &CustomDatasource{}, nil
 }
+
+func (d *CustomDatasource) Dispose() {}
 
 func (d *CustomDatasource) QueryData(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
 	response := backend.NewQueryDataResponse()
@@ -46,11 +45,10 @@ func (d *CustomDatasource) query(ctx context.Context, query backend.DataQuery) b
 
 	log.DefaultLogger.Info("Executing custom data source query", "query", model.QueryText)
 
-	// Return a simple mock data frame to Grafana
-	// In production, connect this to your custom API, database, or telemetry source.
-	frame := data.NewFrame("response")
-	frame.AddField(data.NewField("time", nil, []time.Time{time.Now()}))
-	frame.AddField(data.NewField("value", nil, []float64{42.0}))
+	frame := data.NewFrame("response",
+		data.NewField("time", nil, []time.Time{time.Now()}),
+		data.NewField("value", nil, []float64{42.0}),
+	)
 
 	response.Frames = append(response.Frames, frame)
 	return response

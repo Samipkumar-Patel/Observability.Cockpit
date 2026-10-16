@@ -1,5 +1,10 @@
 # CloudOps Observability Platform
 
+[![GitHub License](https://img.shields.io/github/license/Samipkumar-Patel/Observability.Cockpit)](LICENSE)
+[![GitHub Go Version](https://img.shields.io/github/go-mod/v/Samipkumar-Patel/Observability.Cockpit)](go.mod)
+[![GitHub Stars](https://img.shields.io/github/stars/Samipkumar-Patel/Observability.Cockpit?style=social)](https://github.com/Samipkumar-Patel/Observability.Cockpit)
+[![GHCR Container Image](https://img.shields.io/badge/container-ghcr.io%2Fsamipkumar--patel%2Fcloudops--cockpit-blue?logo=github)](https://ghcr.io/samipkumar-patel/cloudops-cockpit)
+
 An all-in-one, zero-configuration observability engine built in Go for small teams without dedicated DevOps engineers.
 
 Instead of managing Prometheus, Grafana, Loki, Tempo, and OpenTelemetry collectors, **CloudOps Cockpit** provides a single compiled binary that receives OTLP telemetry (metrics, logs, and traces), stores them in persistent SQLite, features an **AI Root-Cause Assistant** and **Open-Source Version Radar**, and serves a built-in multi-page dashboard.
@@ -43,11 +48,11 @@ docker run -d -p 8080:8080 -v cockpit-data:/data ghcr.io/samipkumar-patel/cloudo
 CloudOps Cockpit offers separate modular Helm charts so you can deploy only the features you need.
 
 ### 1. Modular Helm Charts (AKS & Kubernetes)
-- **Version Radar Chart:**
+- **Version Radar Chart (with read-only RBAC):**
   ```bash
   helm install cloudops-radar ./deploy/helm/radar --namespace observability --create-namespace
   ```
-- **Telemetry Chart:**
+- **Telemetry Chart (with SQLite persistence):**
   ```bash
   helm install cloudops-telemetry ./deploy/helm/telemetry --namespace observability --create-namespace
   ```
@@ -105,3 +110,10 @@ Invoke-RestMethod -Uri "http://localhost:8080/v1/metrics" -Method Post -ContentT
 # Push a Log Entry
 Invoke-RestMethod -Uri "http://localhost:8080/v1/logs" -Method Post -ContentType "application/json" -Body '{"service_name":"checkout-svc","level":"ERROR","message":"Database timeout during transaction"}'
 ```
+
+---
+
+## Maintainer & Creator
+
+- **Samipkumar Patel** – Architect and core maintainer of CloudOps Cockpit.
+- Passionate about cloud observability, high-performance Go backend architecture, and simplifying DevOps tools for small teams.

@@ -1,6 +1,0 @@
-apiVersion: v2
-name: cloudops-radar
-description: A Helm chart for CloudOps Version Radar (Open-Source Upgrade Assistant and Helm Release Auditor)
-type: application
-version: 0.1.0
-appVersion: "0.22.0"

@@ -1,6 +1,8 @@
 *.exe
 *.test
 *.prof
-cloudops-cockpit
-telemetry.db
 dist/
+node_modules/
+.DS_Store
+*.sqlite
+*.db

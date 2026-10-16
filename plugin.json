@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.json.schema.json",
+  "type": "datasource",
+  "name": "Custom Observability Data Source",
+  "id": "samipkumar-custom-datasource",
+  "info": {
+    "description": "Custom Grafana data source plugin for querying custom telemetry and metrics engines.",
+    "author": {
+      "name": "Samipkumar Patel"
+    },
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [],
+    "screenshots": [],
+    "updated": "2026-10-09",
+    "version": "1.0.0"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=10.0.0",
+    "plugins": []
+  }
+}

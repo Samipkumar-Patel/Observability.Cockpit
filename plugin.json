@@ -3,7 +3,8 @@
   "type": "datasource",
   "name": "LLM Observability Data Source",
   "id": "samipkumar-llm-datasource",
-  "executable": "samipkumar-llm-datasource_linux_amd64",
+  "backend": true,
+  "executable": "samipkumar-llm-datasource",
   "info": {
     "description": "Grafana data source plugin for querying AI agent token consumption, prompt latency, and LLM telemetry.",
     "author": {

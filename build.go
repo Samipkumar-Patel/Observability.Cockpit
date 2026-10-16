@@ -16,6 +16,7 @@ func main() {
 	}
 
 	cmd := exec.Command("go", "build", "-o", "dist/samipkumar-llm-datasource_linux_amd64", "./pkg")
+	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

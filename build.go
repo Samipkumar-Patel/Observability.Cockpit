@@ -14,9 +14,10 @@ func main() {
 		fmt.Printf("Failed to create dist dir: %v\n", err)
 		os.Exit(1)
 	}
-	// Grafana expects the backend binary to be named following the convention:
-	// <plugin-id>_gpx_<platform>_<arch> or matching plugin.json executable name.
-	// For grafana backend plugins, the binary name inside dist/ must match the target or we copy it.
+
+	moduleJS := `define([], function() { return {}; });`
+	_ = os.WriteFile("dist/module.js", []byte(moduleJS), 0644)
+
 	cmd := exec.Command("go", "build", "-o", "dist/samipkumar-llm-datasource_linux_amd64", "./pkg")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -24,5 +25,5 @@ func main() {
 		fmt.Printf("Build failed: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("Build successful! Binary placed in dist/")
+	fmt.Println("Build successful! Binary and module.js placed in dist/")
 }

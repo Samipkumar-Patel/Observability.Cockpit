@@ -8,12 +8,28 @@ A specialized Grafana backend data source plugin built in Go to monitor AI agent
 
 As companies increasingly build features using Large Language Models (LLMs) and autonomous AI agents (OpenAI, Anthropic, LangChain, CrewAI, n8n, custom pipelines), they face a major blind spot: **traditional monitoring tools (like Prometheus or Datadog) were built for CPU, memory, and HTTP requests, not for AI.**
 
-The objective of this plugin is to give engineering teams **native visibility into their AI applications directly inside Grafana**, helping them answer critical questions:
-1. **Token Consumption & Costs:** How many prompt and completion tokens did specific AI agents consume, and what is the cost impact?
-2. **Prompt Latency:** Why did an LLM call experience delays or slow down?
-3. **Agent Failure Rates:** Are AI workflows throwing API rate-limit errors, JSON parsing exceptions, or context-window overflows?
+The objective of this plugin is to give engineering teams **native visibility into their AI applications directly inside Grafana**.
 
-### How It Works (Data Flow)
+---
+
+## What Problems Does It Solve?
+
+When running AI workloads in production, engineering and SRE teams urgently need to track operational metrics that standard APM and monitoring tools completely miss:
+
+1. **Token Consumption & Cost Control:** 
+   * *Problem:* AI APIs bill strictly by token count (prompt + completion tokens). Without visibility, a single runaway loop in an AI agent can rack up unexpected bills overnight.
+   * *Solution:* Tracks token usage per agent and model in real time so teams can set up alerts and dashboards.
+2. **Prompt Latency & Performance Regressions:** 
+   * *Problem:* LLM response times are inherently variable and often slow (taking seconds rather than milliseconds), impacting user experience.
+   * *Solution:* Visualizes prompt execution duration and latency distributions to identify slow-performing model prompts or congested vector database lookups.
+3. **Agent Failure Rates & Exceptions:** 
+   * *Problem:* Autonomous agents frequently fail due to API rate limits (HTTP 429), context-window overflows, or JSON parsing errors when structuring LLM output.
+   * *Solution:* Captures agent error rates and failure exceptions directly in Grafana alongside infrastructure health.
+
+---
+
+## How It Works (Data Flow)
+
 1. **Your AI Application / Agent:** Records telemetry (tokens, latency, errors) and pushes them to your storage backend (such as local SQLite telemetry storage or an API endpoint).
 2. **Our Go Backend Plugin (`pkg/datasource.go`):** Acts as the bridge. When Grafana requests data for a dashboard panel, our plugin queries the database, formats the rows, and packages them into **Grafana Data Frames**.
 3. **Grafana UI:** Renders the data as time-series graphs, stat counters, and tables right alongside your traditional infrastructure metrics.

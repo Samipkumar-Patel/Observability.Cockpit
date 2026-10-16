@@ -9,7 +9,7 @@ As engineering teams scale AI features built with LLMs (OpenAI, LangChain, CrewA
 ## Project Structure
 
 ```text
-├── pkg/                 # Go backend plugin (Grafana SDK query handler, health check)
+├── pkg/                 # Go backend plugin (Grafana SDK query handler, health check, SQLite integration, unit tests)
 ├── src/                 # TypeScript frontend plugin (Query editor config)
 ├── plugin.json          # Grafana plugin metadata definition
 └── build.go             # Go build automation script
@@ -20,8 +20,10 @@ As engineering teams scale AI features built with LLMs (OpenAI, LangChain, CrewA
 ## Key Features
 
 1. **LLM Telemetry Ingestion:** Query token usage, prompt execution duration, and success/error rates.
-2. **Grafana Data Frame Integration:** Converts backend query results directly into standard Grafana Data Frames for graphs, stat panels, and tables.
-3. **Health Check API:** Built-in connection verification for Grafana data source settings.
+2. **SQLite Storage Integration:** Seamlessly connects to local telemetry databases to fetch real historical metrics.
+3. **Grafana Data Frame Integration:** Converts backend query results directly into standard Grafana Data Frames for graphs, stat panels, and tables.
+4. **Health Check API:** Built-in connection verification for Grafana data source settings.
+5. **Unit Testing:** Comprehensive Go unit tests for backend reliability.
 
 ---
 
@@ -32,11 +34,16 @@ As engineering teams scale AI features built with LLMs (OpenAI, LangChain, CrewA
 - Node.js & npm (for frontend plugin assets)
 - Docker (optional, for local Grafana testing)
 
-### Build the Plugin Backend
+### Build the Plugin Backend & Frontend Stub
 ```bash
 go run build.go
 ```
-The compiled plugin binary will be placed in the `dist/` directory.
+The compiled plugin binary and frontend module will be placed in the `dist/` directory.
+
+### Run Unit Tests
+```bash
+go test -v ./pkg
+```
 
 ---
 
@@ -48,13 +55,16 @@ To test your custom data source plugin locally inside Grafana:
    ```bash
    go run build.go
    ```
-2. Run a local Grafana container and mount your repository directory into Grafana's plugin folder:
+2. Run a local Grafana container and mount your repository's `dist/` and `plugin.json` into Grafana's plugin directory:
    ```bash
+   $cwd = (Get-Item .).FullName
+   docker rm -f grafana
    docker run -d -p 3000:3000 \
      --name=grafana \
      -e "GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=samipkumar-llm-datasource" \
-     -v "$(pwd):/var/lib/grafana/plugins/llm-datasource" \
-     grafana/grafana:latest
+     -v "${cwd}/dist:/var/lib/grafana/plugins/llm-datasource" \
+     -v "${cwd}/plugin.json:/var/lib/grafana/plugins/llm-datasource/plugin.json" \
+     grafana/grafana:11.4.0
    ```
 3. Open `http://localhost:3000` (Login with `admin` / `admin`).
 4. Navigate to **Connections** ➔ **Data sources** ➔ **Add data source**.

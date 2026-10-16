@@ -10,7 +10,14 @@ import (
 
 func main() {
 	fmt.Println("Building Go backend plugin...")
-	cmd := exec.Command("go", "build", "-o", "dist/gpx_custom_datasource_linux_amd64", "./pkg")
+	if err := os.MkdirAll("dist", 0755); err != nil {
+		fmt.Printf("Failed to create dist dir: %v\n", err)
+		os.Exit(1)
+	}
+	// Grafana expects the backend binary to be named following the convention:
+	// <plugin-id>_gpx_<platform>_<arch> or matching plugin.json executable name.
+	// For grafana backend plugins, the binary name inside dist/ must match the target or we copy it.
+	cmd := exec.Command("go", "build", "-o", "dist/samipkumar-llm-datasource_linux_amd64", "./pkg")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

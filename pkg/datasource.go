@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -18,7 +19,7 @@ type LLMObservabilityDatasource struct {
 }
 
 func NewLLMObservabilityDatasource(ctx context.Context, settings backend.DataSourceInstanceSettings) (instancemgmt.Instance, error) {
-	db, err := sql.Open("sqlite", "telemetry.db")
+	db, err := sql.Open("sqlite", "/var/lib/grafana/plugins/llm-datasource/telemetry.db")
 	if err != nil {
 		log.DefaultLogger.Error("Failed to connect to telemetry SQLite DB", "error", err.Error())
 	}
@@ -97,7 +98,7 @@ func (d *LLMObservabilityDatasource) CheckHealth(ctx context.Context, req *backe
 		if err := d.db.Ping(); err == nil {
 			return &backend.CheckHealthResult{
 				Status:  backend.HealthStatusOk,
-				Message: "LLM Observability data source connected successfully to SQLite storage",
+				Message: fmt.Sprintf("LLM Observability connected successfully. DB active."),
 			}, nil
 		}
 	}

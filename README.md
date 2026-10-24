@@ -53,7 +53,7 @@ Requirements: Go 1.25+, Docker Desktop, PowerShell.
 2. **Start Grafana** with the plugin mounted (run from the repository root):
    ```powershell
    docker rm -f grafana
-   docker run -d -p 3000:3000 --name=grafana -e "GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=samipkumar-llm-datasource" -v "$(Get-Item . | Select-Object -ExpandProperty FullName)/dist:/var/lib/grafana/plugins/llm-datasource" -v "$(Get-Item . | Select-Object -ExpandProperty FullName)/plugin.json:/var/lib/grafana/plugins/llm-datasource/plugin.json" grafana/grafana:11.4.0
+   docker run -d -p 3000:3000 --name=grafana -e "GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=samipkumar-llm-datasource" -v "$(Get-Item . | Select-Object -ExpandProperty FullName)/dist:/var/lib/grafana/plugins/llm-datasource" -v "$(Get-Item . | Select-Object -ExpandProperty FullName)/plugin.json:/var/lib/grafana/plugins/llm-datasource/plugin.json" -v "$(Get-Item . | Select-Object -ExpandProperty FullName)/telemetry.db:/data/telemetry.db" grafana/grafana:11.4.0
    ```
    Wait about 25 seconds for Grafana to start.
 3. **Access Grafana:**
@@ -61,7 +61,8 @@ Requirements: Go 1.25+, Docker Desktop, PowerShell.
 4. **Add the data source:**
    - Go to **Connections** ➔ **Data sources** ➔ **Add data source**.
    - Search for **LLM Observability Data Source** and select it.
-   - Click **Save & test**. Expected result: `LLM Observability data source connected (Mock mode)`.
+   - Set **Telemetry DB Path** to `/data/telemetry.db` (the path inside the container).
+   - Click **Save & test**. Expected result: `LLM Observability data source connected (7 metric rows in /data/telemetry.db)`.
 5. **Check backend logs if needed:**
    ```powershell
    docker logs grafana 2>&1 | Select-String "samipkumar"
@@ -69,8 +70,8 @@ Requirements: Go 1.25+, Docker Desktop, PowerShell.
    Look for `Plugin registered` and no `Could not start plugin backend` errors.
 
 ### Known limitations
-- **The config and query editors are not built yet.** The data source page shows only the default Settings and Delete buttons, because `dist/module.js` is a stub. Frontend bundling (`package.json`, webpack) is pending.
-- **The backend returns mock data.** The health check reports "Mock mode" because `telemetry.db` is not mounted into the container. Queries return fixed values until it is.
+- **Metric names must match the database.** The query editor offers `tokens_consumed` and `prompt_latency_ms`, but the sample `telemetry.db` contains `request_duration_ms` and `orders_processed`. Queries return data only for metric names that exist in the database.
+- **Query filter is not applied.** The "Query Filter" field in the query editor is stored but not used by the backend yet.
 - The plugin is unsigned, so Grafana logs a warning. This is expected for local development.
 
 ---

@@ -1,9 +1,7 @@
 import React from 'react';
-import { LegacyForms } from '@grafana/ui';
+import { InlineField, Input } from '@grafana/ui';
 import { DataSourcePluginOptionsEditorProps } from '@grafana/data';
 import { MyDataSourceOptions } from '../types';
-
-const { FormField } = LegacyForms;
 
 export interface Props extends DataSourcePluginOptionsEditorProps<MyDataSourceOptions> {}
 
@@ -22,18 +20,13 @@ export function ConfigEditor(props: Props) {
   };
 
   return (
-    <div className="gf-form-group">
-      <div className="gf-form">
-        <FormField
-          label="Telemetry DB Path"
-          labelWidth={10}
-          inputWidth={25}
-          onChange={handlePathChange}
-          value={jsonData.dbPath || 'telemetry.db'}
-          placeholder="Path to SQLite telemetry.db"
-          tooltip="Path where AI agent token counts and metrics are stored."
-        />
-      </div>
-    </div>
+    <InlineField label="Telemetry DB Path" labelWidth={20} tooltip="Path to the SQLite telemetry.db file that stores AI agent metrics.">
+      <Input
+        width={50}
+        value={jsonData.dbPath || ''}
+        onChange={handlePathChange}
+        placeholder="telemetry.db"
+      />
+    </InlineField>
   );
 }

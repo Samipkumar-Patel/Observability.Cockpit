@@ -24,9 +24,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Copy module.js placeholder or build frontend if npm is available
-	moduleJS := `define([], function() { return {}; });`
-	_ = os.WriteFile("dist/module.js", []byte(moduleJS), 0644)
-
-	fmt.Println("Build successful! Binary and frontend module placed in dist/")
+	fmt.Println("Backend built into dist/. Run 'npm run build' to build the frontend into dist/module.js.")
 }

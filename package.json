@@ -1,0 +1,25 @@
+{
+  "name": "samipkumar-llm-datasource",
+  "version": "1.0.0",
+  "description": "Grafana data source plugin for querying AI agent token consumption, prompt latency, and LLM telemetry.",
+  "private": true,
+  "scripts": {
+    "build": "webpack --config webpack.config.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@grafana/data": "^11.4.0",
+    "@grafana/runtime": "^11.4.0",
+    "@grafana/ui": "^11.4.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "copy-webpack-plugin": "^12.0.2",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.4.5",
+    "webpack": "^5.91.0",
+    "webpack-cli": "^5.1.4"
+  }
+}

@@ -1,0 +1,183 @@
+{
+  "uid": "llm-observability",
+  "title": "LLM & Agent Observability",
+  "tags": ["llm", "genai", "opentelemetry", "agents"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(gen_ai_client_operation_duration_seconds_count, exported_job)", "refId": "service" },
+        "definition": "label_values(gen_ai_client_operation_duration_seconds_count, exported_job)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "model",
+        "label": "Model",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(gen_ai_client_operation_duration_seconds_count, gen_ai_request_model)", "refId": "model" },
+        "definition": "label_values(gen_ai_client_operation_duration_seconds_count, gen_ai_request_model)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Input tokens (selected range)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(gen_ai_client_inference_usage_input_tokens_total{exported_job=~\"$service\", gen_ai_request_model=~\"$model\"}[$__range]))" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Output tokens (selected range)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(gen_ai_client_inference_usage_output_tokens_total{exported_job=~\"$service\", gen_ai_request_model=~\"$model\"}[$__range]))" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "LLM calls (selected range)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(gen_ai_client_operation_duration_seconds_count{exported_job=~\"$service\", gen_ai_request_model=~\"$model\"}[$__range]))" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Error rate (selected range)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.02 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(gen_ai_client_operation_duration_seconds_count{exported_job=~\"$service\", gen_ai_request_model=~\"$model\", error_type!=\"\"}[$__range])) / sum(increase(gen_ai_client_operation_duration_seconds_count{exported_job=~\"$service\", gen_ai_request_model=~\"$model\"}[$__range]))" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Tokens per minute by model",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "legendFormat": "input {{gen_ai_request_model}}", "expr": "sum by (gen_ai_request_model) (rate(gen_ai_client_inference_usage_input_tokens_total{exported_job=~\"$service\", gen_ai_request_model=~\"$model\"}[$__rate_interval])) * 60" },
+        { "refId": "B", "legendFormat": "output {{gen_ai_request_model}}", "expr": "sum by (gen_ai_request_model) (rate(gen_ai_client_inference_usage_output_tokens_total{exported_job=~\"$service\", gen_ai_request_model=~\"$model\"}[$__rate_interval])) * 60" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "LLM requests per second by model",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "legendFormat": "{{gen_ai_request_model}}", "expr": "sum by (gen_ai_request_model) (rate(gen_ai_client_operation_duration_seconds_count{exported_job=~\"$service\", gen_ai_request_model=~\"$model\"}[$__rate_interval]))" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "LLM latency p50 and p95 by model",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "legendFormat": "p50 {{gen_ai_request_model}}", "expr": "histogram_quantile(0.5, sum by (le, gen_ai_request_model) (rate(gen_ai_client_operation_duration_seconds_bucket{exported_job=~\"$service\", gen_ai_request_model=~\"$model\"}[$__rate_interval])))" },
+        { "refId": "B", "legendFormat": "p95 {{gen_ai_request_model}}", "expr": "histogram_quantile(0.95, sum by (le, gen_ai_request_model) (rate(gen_ai_client_operation_duration_seconds_bucket{exported_job=~\"$service\", gen_ai_request_model=~\"$model\"}[$__rate_interval])))" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Errors by type",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "legendFormat": "{{error_type}}", "expr": "sum by (error_type) (rate(gen_ai_client_operation_duration_seconds_count{exported_job=~\"$service\", gen_ai_request_model=~\"$model\", error_type!=\"\"}[$__rate_interval]))" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Agent run duration p95",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 20 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "legendFormat": "{{gen_ai_agent_name}}", "expr": "histogram_quantile(0.95, sum by (le, gen_ai_agent_name) (rate(gen_ai_invoke_agent_duration_seconds_bucket{exported_job=~\"$service\"}[$__rate_interval])))" }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Average LLM calls and tool calls per agent run",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 20 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "legendFormat": "LLM calls per run", "expr": "sum(rate(gen_ai_invoke_agent_inference_calls_sum{exported_job=~\"$service\"}[$__rate_interval])) / sum(rate(gen_ai_invoke_agent_inference_calls_count{exported_job=~\"$service\"}[$__rate_interval]))" },
+        { "refId": "B", "legendFormat": "tool calls per run", "expr": "sum(rate(gen_ai_invoke_agent_tool_calls_sum{exported_job=~\"$service\"}[$__rate_interval])) / sum(rate(gen_ai_invoke_agent_tool_calls_count{exported_job=~\"$service\"}[$__rate_interval]))" }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Tool execution p95 by tool",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 20 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "legendFormat": "{{gen_ai_tool_name}}", "expr": "histogram_quantile(0.95, sum by (le, gen_ai_tool_name) (rate(gen_ai_execute_tool_duration_seconds_bucket{exported_job=~\"$service\"}[$__rate_interval])))" }
+      ]
+    }
+  ]
+}
